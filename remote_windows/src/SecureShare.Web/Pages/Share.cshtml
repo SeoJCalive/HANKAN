@@ -1,0 +1,36 @@
+@page "/Share/{token}"
+@model SecureShare.Web.Pages.ShareModel
+@{
+    ViewData["Title"] = "공유 파일";
+    ViewData["Phase"] = "SHARE / 다운로드";
+}
+<section class="intro" aria-labelledby="page-title">
+    <p class="eyebrow">HANKAN / SHARED FILE</p>
+    <h1 id="page-title">공유 파일</h1>
+    <p class="lead">만료 시각 전까지 파일을 다운로드할 수 있습니다.</p>
+</section>
+@if (Model.Item is not null)
+{
+    <section class="status-section" aria-labelledby="share-title">
+        <div class="section-heading"><h2 id="share-title">파일 정보</h2></div>
+        <dl class="status-list">
+            <div class="status-row"><dt>파일 이름</dt><dd>@Model.Item.Name</dd></div>
+            <div class="status-row"><dt>크기</dt><dd>@Model.Item.SizeBytes.ToString("N0") B</dd></div>
+            <div class="status-row"><dt>만료</dt><dd>@Model.Item.ExpiresUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm")</dd></div>
+        </dl>
+    </section>
+    <form method="post" action="/Share/@RouteData.Values["token"]?handler=Download" class="setup-form share-download">
+        @Html.AntiForgeryToken()
+        @if (Model.Item.PasswordNeeded)
+        {
+            <label for="Password">공유 비밀번호</label>
+            <input id="Password" name="Password" type="password" autocomplete="off" required maxlength="128" />
+        }
+        @if (Model.Error is not null) { <p class="form-error" role="alert">@Model.Error</p> }
+        <button type="submit" class="button-primary">다운로드</button>
+    </form>
+}
+else
+{
+    <p class="notice" role="alert">이 공유는 사용할 수 없습니다. 주소와 만료 상태를 확인하세요.</p>
+}

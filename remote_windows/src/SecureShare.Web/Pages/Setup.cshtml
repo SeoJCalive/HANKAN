@@ -1,0 +1,33 @@
+@page
+@model SecureShare.Web.Pages.SetupModel
+@{
+    ViewData["Title"] = "최초 설정";
+    ViewData["Phase"] = "LOCAL SETUP / 서버 PC 전용";
+}
+
+<section class="setup-grid" aria-labelledby="page-title">
+    <div class="setup-intro">
+        <p class="eyebrow">HANKAN / 02</p>
+        <h1 id="page-title">최초 설정</h1>
+        <p class="lead">관리자 계정과 파일 저장소를 준비합니다.</p>
+        <p class="notice">서버 PC 콘솔의 일회용 값으로 설정하세요.<br />외부 터널은 설정 후 여세요.</p>
+    </div>
+    <form method="post" class="setup-form">
+        @Html.AntiForgeryToken()
+        @if (Model.Error is not null) { <p class="form-error" role="alert">@Model.Error</p> }
+        <label for="setup-code">콘솔 일회용 값</label>
+        <input id="setup-code" name="Code" type="password" autocomplete="off" required />
+        <label for="admin-email">관리자 이메일</label>
+        <input id="admin-email" name="Email" type="email" autocomplete="username" value="@Model.Email" maxlength="254" required />
+        <label for="admin-password">관리자 비밀번호</label>
+        <input id="admin-password" name="Password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
+        <p class="field-help">12자 이상. 이 계정의 비밀번호는 자동 복구할 수 없습니다.</p>
+        <label for="storage-folder">파일 저장 폴더</label>
+        <input id="storage-folder" name="FolderPath" type="text" value="@Model.FolderPath" placeholder="C:\HankanFiles" required />
+        <p class="field-help">비어 있는 Windows 절대 경로를 지정하세요. 기존 파일은 자동 등록되지 않습니다.</p>
+        <label for="quota">전체 용량 한도 (GiB)</label>
+        <input id="quota" name="QuotaGiB" type="number" min="1" max="1024" value="@Model.QuotaGiB" required />
+        <button type="submit" class="button-primary">설정 완료</button>
+    </form>
+</section>
+<p class="footnote">설정이 완료되면 이 화면은 다시 열리지 않습니다.</p>

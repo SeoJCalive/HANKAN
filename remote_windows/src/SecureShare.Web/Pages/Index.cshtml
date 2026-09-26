@@ -1,0 +1,23 @@
+@page
+@model SecureShare.Web.Pages.IndexModel
+@{
+    ViewData["Title"] = "저장소 준비 완료";
+    ViewData["Phase"] = "ADMIN / 저장소";
+}
+<section class="intro" aria-labelledby="page-title">
+    <p class="eyebrow">WINDOWS SELF-HOSTED FILE SHARING</p>
+    <h1 id="page-title">저장소 준비 완료</h1>
+    <p class="lead">관리자 계정과 전용 파일 저장 공간이 설정되었습니다.</p>
+</section>
+<section class="status-section" aria-labelledby="status-title">
+    <div class="section-heading"><h2 id="status-title">현재 구성</h2></div>
+    <dl class="status-list">
+        <div class="status-row"><dt>관리자</dt><dd>@Model.Email</dd></div>
+        <div class="status-row"><dt>저장 폴더</dt><dd class="path-value">@Model.Folder</dd></div>
+        <div class="status-row"><dt>전체 용량 한도</dt><dd>@Model.QuotaGiB GiB</dd></div>
+        <div class="status-row"><dt>계정 관리</dt><dd><a href="/Admin/Users">사용자와 권한 관리</a></dd></div>
+        <div class="status-row"><dt>공유 관리</dt><dd><a href="/Shares">전체 공유</a></dd></div>
+        <div class="status-row"><dt>감사 기록</dt><dd><a href="/Admin/Audit">최근 보호 작업 보기</a></dd></div>
+    </dl>
+</section>
+<p class="footnote"><a href="/Files">공용 파일</a>에서 파일을 올리고 공유할 수 있습니다.</p>

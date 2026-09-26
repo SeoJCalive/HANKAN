@@ -1,0 +1,22 @@
+@page
+@model SecureShare.Web.Pages.RegisterModel
+@{
+    ViewData["Title"] = "계정 만들기";
+    ViewData["Phase"] = "ACCOUNT / 가입";
+}
+<section class="auth-panel" aria-labelledby="page-title">
+    <p class="eyebrow">HANKAN / ACCOUNT</p>
+    <h1 id="page-title">계정 만들기</h1>
+    <p class="lead">가입 후 공용 파일 접근 권한을 신청할 수 있습니다.</p>
+    <form method="post" class="setup-form">
+        @Html.AntiForgeryToken()
+        @if (Model.Error is not null) { <p class="form-error" role="alert">@Model.Error</p> }
+        <label for="email">이메일</label>
+        <input id="email" name="Email" type="email" autocomplete="username" value="@Model.Email" maxlength="254" required />
+        <label for="password">비밀번호</label>
+        <input id="password" name="Password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
+        <p class="field-help">12자 이상. 가입만으로 공용 파일에 접근할 수는 없습니다.</p>
+        <button class="button-primary" type="submit">계정 만들기</button>
+    </form>
+    <p class="footnote">이미 계정이 있나요? <a href="/Login">로그인</a></p>
+</section>
