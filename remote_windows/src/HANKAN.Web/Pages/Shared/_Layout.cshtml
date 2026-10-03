@@ -1,0 +1,47 @@
+@inject HANKAN.Web.AccessStore Access
+@inject HANKAN.Web.SetupStore Setup
+@{
+    var current = await Access.CurrentAsync(User);
+}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="한칸(HANKAN) — 내 PC 기반 파일 저장·공유 서비스" />
+    <title>@ViewData["Title"] · 한칸(HANKAN)</title>
+    <link rel="stylesheet" href="/css/site.css" />
+</head>
+<body>
+    <header class="site-header">
+        <div class="site-header__inner">
+            <span class="brand">HAN:KAN</span>
+            <span class="phase-label">@(ViewData["Phase"] ?? "HANKAN / 02")</span>
+            @if (Setup.State == HANKAN.Web.SetupState.Ready)
+            {
+                <nav class="header-nav" aria-label="주요 메뉴">
+                    <a href="/Public">공개 파일</a>
+                    @if (current is null)
+                    {
+                        <a href="/Login">로그인</a><a href="/Register">가입</a>
+                    }
+                    else
+                    {
+                        <a href="/">@(current.IsAdmin ? "저장소" : "내 상태")</a>
+                        @if (current.IsAdmin || current.State is "viewer" or "owner") { <a href="/Files">공용 파일</a> }
+                        @if (current.IsAdmin || current.State == "owner") { <a href="/Shares">@(current.IsAdmin ? "전체 공유" : "내 공유")</a> }
+                        @if (current.IsAdmin) { <a href="/Admin/Users">사용자</a><a href="/Admin/Audit">감사 기록</a> }
+                        <form method="post" action="/Access?handler=Logout">
+                            @Html.AntiForgeryToken()
+                            <button type="submit" class="header-nav__logout">로그아웃</button>
+                        </form>
+                    }
+                </nav>
+            }
+        </div>
+    </header>
+    <main id="main-content" class="page-shell">
+        @RenderBody()
+    </main>
+</body>
+</html>

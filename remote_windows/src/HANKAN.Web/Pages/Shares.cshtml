@@ -1,0 +1,67 @@
+@page
+@model HANKAN.Web.Pages.SharesModel
+@{
+    ViewData["Title"] = Model.IsAdmin ? "전체 공유" : "내 공유";
+    ViewData["Phase"] = Model.IsAdmin ? "ADMIN / 전체 공유" : "OWNER / 내 공유";
+}
+<section class="intro" aria-labelledby="page-title">
+    <p class="eyebrow">HANKAN / SHARES</p>
+    <h1 id="page-title">@(Model.IsAdmin ? "전체 공유" : "내 공유")</h1>
+    <p class="lead">파일별 링크와 만료 상태를 관리합니다.</p>
+</section>
+@if (Model.Error is not null) { <p class="form-error" role="alert">@Model.Error</p> }
+@if (Model.CreatedToken is not null)
+{
+    <section class="notice" aria-label="새 공유 주소">
+        <label for="created-url">새 공유 주소</label>
+        <input id="created-url" class="share-url" readonly data-token="@Model.CreatedToken" />
+        <p class="field-help">현재 접속 주소에서 복사합니다. 외부 전달은 HTTPS 터널 주소로 접속해 복사하세요. 임시 주소가 바뀌면 새 주소에서 다시 복사해야 합니다.</p>
+    </section>
+}
+<section class="status-section" aria-labelledby="shares-title">
+    <div class="section-heading"><h2 id="shares-title">공유 목록</h2><span>@Model.Items.Count 개</span></div>
+    @if (Model.Items.Count == 0) { <p class="empty-state">생성된 공유가 없습니다.</p> }
+    @foreach (var item in Model.Items)
+    {
+        <article class="user-row">
+            <div>
+                <h3>@item.Name</h3>
+                <p>@(item.Mode == "public" ? "공개" : "링크 전용") · @item.Creator · 만료 @item.ExpiresUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm") · @item.Status</p>
+            </div>
+            <div class="user-actions">
+                @if (item.Status == "활성")
+                {
+                    <form method="post" action="/Shares?handler=Copy&amp;id=@item.Id" class="action-form copy-form">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="button-secondary">URL 복사</button>
+                    </form>
+                }
+                @if (item.Status != "취소됨")
+                {
+                    <form method="post" action="/Shares?handler=Cancel&amp;id=@item.Id" class="action-form" onsubmit="return confirm('공유를 취소하면 이 주소는 즉시 사용할 수 없습니다. 계속할까요?')">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="button-secondary">@(item.Mode == "public" ? "게시 중단" : "취소")</button>
+                    </form>
+                }
+            </div>
+        </article>
+    }
+</section>
+<p id="copy-status" role="status" aria-live="polite" class="field-help"></p>
+<script>
+    const created = document.getElementById("created-url");
+    if (created) created.value = `${location.origin}/Share/${created.dataset.token}`;
+    for (const form of document.querySelectorAll(".copy-form")) {
+        form.addEventListener("submit", async event => {
+            event.preventDefault();
+            const status = document.getElementById("copy-status");
+            try {
+                const response = await fetch(form.action, { method: "POST", body: new FormData(form) });
+                if (!response.ok) { status.textContent = "주소를 복사할 수 없습니다. 상태를 새로 확인하세요."; return; }
+                const url = `${location.origin}/Share/${await response.text()}`;
+                await navigator.clipboard.writeText(url);
+                status.textContent = "주소를 복사했습니다. 외부 전달은 HTTPS 터널 주소에서 복사하고, 임시 주소가 바뀌면 다시 복사하세요.";
+            } catch { status.textContent = "복사에 실패했습니다. 보안 연결에서 다시 시도하세요."; }
+        });
+    }
+</script>

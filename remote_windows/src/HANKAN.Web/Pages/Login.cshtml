@@ -1,0 +1,23 @@
+@page
+@model HANKAN.Web.Pages.LoginModel
+@{
+    ViewData["Title"] = "로그인";
+    ViewData["Phase"] = "ACCOUNT / 로그인";
+}
+
+<section class="auth-panel" aria-labelledby="page-title">
+    <p class="eyebrow">HANKAN / ACCOUNT</p>
+    <h1 id="page-title">로그인</h1>
+    <p class="lead">계정으로 로그인하면 현재 접근 상태를 확인할 수 있습니다.</p>
+    <form method="post" class="setup-form">
+        @Html.AntiForgeryToken()
+        @if (Model.Error is not null) { <p class="form-error" role="alert">@Model.Error</p> }
+        <label for="email">이메일</label>
+        <input id="email" name="Email" type="email" autocomplete="username" value="@Model.Email" required />
+        <label for="password">비밀번호</label>
+        <input id="password" name="Password" type="password" autocomplete="current-password" required />
+        <button type="submit" class="button-primary">로그인</button>
+    </form>
+    <p class="footnote">계정이 없나요? <a href="/Register">가입하기</a></p>
+    <p class="footnote"><a href="/Public">공개 파일 보기</a></p>
+</section>

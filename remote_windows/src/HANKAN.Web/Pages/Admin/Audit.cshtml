@@ -1,0 +1,36 @@
+@page
+@model HANKAN.Web.Pages.Admin.AuditModel
+@{
+    ViewData["Title"] = "감사 기록";
+    ViewData["Phase"] = "ADMIN / 감사 기록";
+}
+<section class="intro" aria-labelledby="page-title">
+    <p class="eyebrow">HANKAN / AUDIT</p>
+    <h1 id="page-title">감사 기록</h1>
+    <p class="lead">보호 작업의 결과를 최신 기록부터 확인합니다.</p>
+</section>
+<section class="status-section" aria-labelledby="audit-title">
+    <div class="section-heading"><h2 id="audit-title">최근 사건</h2><span>페이지당 최대 30건</span></div>
+    @if (Model.Items.Count == 0) { <p class="empty-state">표시할 감사 기록이 없습니다.</p> }
+    else
+    {
+        <div class="audit-list">
+            <div class="audit-row audit-row--heading" aria-hidden="true"><span>시각</span><span>작업자</span><span>사건</span><span>대상 ID</span><span>결과</span></div>
+            @foreach (var item in Model.Items)
+            {
+                <div class="audit-row">
+                    <time data-label="시각" datetime="@item.CreatedUtc.ToString("O")">@item.CreatedUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm:ss")</time>
+                    <span data-label="작업자" class="audit-row__text">@Model.Actor(item)</span>
+                    <span data-label="사건" class="audit-row__text">@item.Action</span>
+                    <span data-label="대상" class="audit-row__text">@(item.TargetId ?? item.FileId ?? "—")</span>
+                    <strong data-label="결과">@(item.Result switch { "success" => "성공", "denied" => "거부", _ => "실패" })</strong>
+                </div>
+            }
+        </div>
+    }
+</section>
+<nav class="page-nav audit-pages" aria-label="감사 기록 페이지">
+    @if (Model.OlderThan is not null) { <a href="/Admin/Audit?before=@Model.OlderThan">이전 기록</a> }
+    <a href="/Admin/Audit">최신 기록</a>
+</nav>
+<p class="footnote">서버가 기록한 작업 결과입니다. 다운로드 시작과 전송 완료는 별도 사건이며, 브라우저 저장 완료를 뜻하지 않습니다.</p>

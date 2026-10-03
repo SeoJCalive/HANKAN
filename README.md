@@ -10,7 +10,7 @@
 2. 저장소를 내려받은 뒤 PowerShell에서 다음 명령을 실행한다.
 
    ```powershell
-   dotnet run --project .\remote_windows\src\SecureShare.Web\SecureShare.Web.csproj
+   dotnet run --project .\remote_windows\src\HANKAN.Web\HANKAN.Web.csproj
    ```
 
 3. 서버 PC에서 `http://127.0.0.1:5180/`을 연다. 콘솔에 표시된 일회용 설정 코드를 입력하고 관리자 이메일·비밀번호, 비어 있는 전용 저장 폴더의 **Windows 절대 경로**, 전체 용량 한도를 지정한다.
@@ -18,6 +18,6 @@
 
 앱은 Windows 루프백 주소에서만 수신한다. 다른 기기에서 접속하려면 최초 설정을 완료한 뒤 별도의 HTTPS 연결 경로를 구성해야 한다. 브라우저에서 복사한 공유 주소는 현재 접속한 주소를 사용한다.
 
-계정·설정·SQLite 데이터베이스는 실행한 Windows 계정의 `%LOCALAPPDATA%\SecureShare`에 저장된다. 업로드 파일은 최초 설정에서 지정한 폴더에 암호화되어 저장된다. 기존 데이터를 유지하려면 **같은 Windows 계정의 앱 데이터 폴더와 파일 저장 폴더를 함께 보관**해야 한다. 둘 중 하나를 잃거나 다른 PC로 옮기면 파일에 접근하지 못할 수 있다.
+계정·설정·SQLite 데이터베이스 `hankan.db`는 실행한 Windows 계정의 `%LOCALAPPDATA%\HANKAN`에 저장된다. 업로드 파일은 최초 설정에서 지정한 폴더에 암호화되어 저장된다. 기존 데이터를 유지하려면 **같은 Windows 계정의 앱 데이터 폴더와 파일 저장 폴더를 함께 보관**해야 한다. 둘 중 하나를 잃거나 다른 PC로 옮기면 파일에 접근하지 못할 수 있다.
 
 이 저장소는 수업 시연을 위한 첫 버전의 소스 코드다. 상시 인터넷 서비스로 운영하기 위한 배포·백업·보안 점검 절차는 제공하지 않는다.
