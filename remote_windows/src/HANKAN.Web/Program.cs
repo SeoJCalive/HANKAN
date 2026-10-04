@@ -24,6 +24,9 @@ builder.Services.AddRazorPages(options =>
 builder.Services.AddScoped<AccessStore>();
 builder.Services.AddScoped<FileStore>();
 builder.Services.AddScoped<FolderStore>();
+builder.Services.AddScoped<SelectionResolver>();
+builder.Services.AddScoped<BulkMoveStore>();
+builder.Services.AddScoped<BulkDeleteStore>();
 builder.Services.AddScoped<ShareStore>();
 builder.Services.AddScoped<AuditStore>();
 builder.Services.AddSingleton<FileTransferGate>();

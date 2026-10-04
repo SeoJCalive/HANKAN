@@ -23,7 +23,10 @@ public sealed class SharesModel(ShareStore shares, AccessStore access, AuditStor
 
     public async Task<IActionResult> OnPostCreateAsync()
     {
-        if (!DateTimeOffset.TryParse(ExpiresUtc, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed) ||
+        if (Request.Form.ContainsKey("folderIds") || Request.Form.ContainsKey("fileIds") ||
+            Request.Form["FileId"].Count != 1)
+            Error = "공유는 파일 하나만 선택할 수 있습니다.";
+        else if (!DateTimeOffset.TryParse(ExpiresUtc, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed) ||
             !ExpiresUtc.EndsWith('Z')) Error = "만료 시각을 선택하세요.";
         else
         {

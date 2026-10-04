@@ -156,15 +156,31 @@ h1 { margin: 0; font-size: var(--type-display); font-weight: 900; letter-spacing
 .storage-quota, .storage-role { margin: 0; }
 .storage-role { color: var(--ink-muted); }
 .storage-notice { padding: var(--space-4); border: 1px solid var(--line-strong); }
-.storage-list { border-top: 1px solid var(--line); }
+.storage-selection-help { margin-bottom: var(--space-4); }
+.storage-selection { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-4); margin-bottom: var(--space-4); padding: var(--space-4); border: 1px solid var(--line-strong); background: var(--surface-muted); }
+.storage-selection .storage-selection__actions [hidden] { display: none; }
+.storage-selection__summary { display: grid; gap: var(--space-2); }
+.storage-selection__summary span { font-size: var(--type-small); }
+.storage-selection__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.storage-selection__actions .button-secondary { display: inline-flex; align-items: center; min-height: 2.75rem; padding: var(--space-2) var(--space-4); text-decoration: none; }
+.storage-selection__actions button:disabled { color: var(--ink-muted); border-color: var(--line); background: var(--surface); cursor: default; }
+.storage-selection__feedback { position: fixed; z-index: 7; bottom: var(--space-4); left: var(--space-4); max-width: calc(100vw - 2 * var(--space-4)); padding: var(--space-2) var(--space-4); border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font-size: var(--type-small); }
+.storage-selection__feedback:empty { display: none; }
+.storage-list { border-top: 1px solid var(--line); padding: 0 var(--space-2) var(--space-12); }
+.storage-list:focus-visible, .storage-row:focus-visible, .storage-row__select input:focus-visible, .storage-menu summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.storage-marquee { position: fixed; z-index: 6; border: 1px solid var(--line-strong); background: color-mix(in srgb, var(--ink) 10%, transparent); pointer-events: none; }
 .storage-list-head, .storage-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(5rem, .5fr) minmax(10rem, .9fr) 5.5rem; gap: var(--space-4); align-items: center; }
 .storage-list-head { padding: var(--space-4) var(--space-2); color: var(--ink-muted); font-size: var(--type-small); border-bottom: 1px solid var(--line); }
 .storage-list-head span:last-child { text-align: right; }
 .storage-row { position: relative; min-height: 4.5rem; padding: var(--space-2); border-bottom: 1px solid var(--line); }
 .storage-row:hover { background: var(--surface-muted); }
-.storage-row__name { display: flex; align-items: center; gap: var(--space-4); min-width: 0; font-weight: 700; text-decoration: none; }
+.storage-row.is-selected { background: var(--surface-muted); }
+.storage-row.is-drop-target, .storage-tree-link.is-drop-target { background: var(--ink); color: var(--surface); }
+.storage-row.is-drop-blocked, .storage-tree-link.is-drop-blocked { outline: 2px dashed var(--line-strong); outline-offset: -2px; cursor: not-allowed; }
+.storage-row__name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-weight: 700; text-decoration: none; user-select: none; }
+.storage-row__select { display: flex; align-items: center; justify-content: center; flex: none; width: 2.75rem; min-height: 2.75rem; cursor: pointer; }
+.storage-row__select input { width: var(--space-4); height: var(--space-4); margin: 0; accent-color: var(--ink); cursor: pointer; }
 .storage-row__name span { min-width: 0; overflow-wrap: anywhere; }
-.storage-row__name:hover { text-decoration: underline; }
 .storage-row__size, .storage-row__date { color: var(--ink-muted); font-size: var(--type-small); }
 .storage-row__action { justify-self: end; }
 .storage-row__action a { text-decoration: none; }
@@ -198,6 +214,13 @@ h1 { margin: 0; font-size: var(--type-display); font-weight: 900; letter-spacing
 .storage-dialog__buttons { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
 .storage-dialog__buttons .button-primary { margin: 0; }
 .storage-dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.storage-delete-impact { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: var(--space-6) 0; border: 1px solid var(--line-strong); background: var(--line); }
+.storage-delete-impact div { min-width: 0; padding: var(--space-4); background: var(--surface); }
+.storage-delete-impact dt { color: var(--ink-muted); font-size: var(--type-small); }
+.storage-delete-impact dd { margin: var(--space-2) 0 0; font-weight: 700; overflow-wrap: anywhere; }
+.storage-dialog .storage-delete-confirm { display: flex; align-items: center; gap: var(--space-2); }
+.storage-dialog .storage-delete-confirm input[type=checkbox] { flex: none; width: var(--space-4); min-height: var(--space-4); height: var(--space-4); margin: 0; padding: 0; accent-color: var(--ink); }
+.storage-delete-confirm span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .storage-destinations { display: grid; max-height: 18rem; margin: 0; padding: var(--space-2); border: 1px solid var(--line); overflow: auto; }
 .storage-destinations legend { font-size: var(--type-small); font-weight: 700; }
 .storage-dialog .storage-destinations__item { display: flex; align-items: center; gap: var(--space-2); min-height: 2.75rem; padding: var(--space-2); padding-left: calc(var(--space-2) + var(--tree-depth, 0) * var(--space-4)); cursor: pointer; }
@@ -213,6 +236,7 @@ h1 { margin: 0; font-size: var(--type-display); font-weight: 900; letter-spacing
 }
 
 @media (max-width: 600px) {
+    .storage-selection { grid-template-columns: 1fr; }
     .storage-list-head { display: none; }
     .storage-row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
     .storage-row__name { grid-column: 1; }
@@ -222,6 +246,7 @@ h1 { margin: 0; font-size: var(--type-display); font-weight: 900; letter-spacing
     .storage-breadcrumb { font-size: var(--type-body); }
     .storage-toolbar__actions, .storage-toolbar__actions button { width: 100%; }
     .storage-dialog { padding: var(--space-4); }
+    .storage-delete-impact div { padding: var(--space-2); }
 }
 
 @media (max-width: 600px) {

@@ -22,12 +22,12 @@
     <aside class="storage-sidebar" aria-label="폴더 탐색">
         <h2>폴더</h2>
         <nav aria-label="저장소 폴더">
-            <a class="storage-tree-link @(Model.Folder!.Id is null ? "is-current" : "")" href="/Files" aria-current="@(Model.Folder.Id is null ? "page" : null)">
+            <a class="storage-tree-link @(Model.Folder!.Id is null ? "is-current" : "")" href="/Files" aria-current="@(Model.Folder.Id is null ? "page" : null)" data-drop-destination="" data-path-ids="">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5h7l2 2h11v12H2z" /></svg><span>공용 저장소</span>
             </a>
             @foreach (var node in tree)
             {
-                <a class="storage-tree-link @(Model.Folder.Id == node.Folder.Id ? "is-current" : "")" style="--tree-depth:@node.Depth" href="/Files?folderId=@node.Folder.Id" aria-current="@(Model.Folder.Id == node.Folder.Id ? "page" : null)">
+                <a class="storage-tree-link @(Model.Folder.Id == node.Folder.Id ? "is-current" : "")" style="--tree-depth:@node.Depth" href="/Files?folderId=@node.Folder.Id" aria-current="@(Model.Folder.Id == node.Folder.Id ? "page" : null)" data-drop-destination="@node.Folder.Id" data-path-ids="@node.Ids">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5h7l2 2h11v12H2z" /></svg><span>@node.Folder.Name</span>
                 </a>
             }
@@ -70,15 +70,60 @@
         {
             <p class="storage-notice" role="status">@Model.DeleteMessage</p>
         }
-        <section class="storage-list" aria-labelledby="storage-list-title">
+        <p id="selection-help" class="field-help storage-selection-help">클릭으로 선택 · Ctrl/Command로 추가 · Shift로 범위 선택 · Enter 또는 더블클릭으로 열기·다운로드@(canManage ? " · 데스크톱에서는 선택 항목을 폴더로 끌어 이동" : "")</p>
+        <div id="selection-toolbar" class="storage-selection" role="region" aria-label="선택 항목 작업">
+            @Html.AntiForgeryToken()
+            <div class="storage-selection__summary" role="status" aria-live="polite">
+                <strong id="selection-count">직접 선택 0개</strong>
+                <span id="selection-scope">하위 포함 · 폴더 0개 · 파일 0개</span>
+                <span id="selection-download-status" hidden></span>
+            </div>
+            <div class="storage-selection__actions">
+                <a id="selection-download" class="button-secondary" hidden>다운로드</a>
+                <button id="selection-download-zip" type="button" class="button-secondary" hidden>ZIP 다운로드</button>
+                @if (canManage)
+                {
+                    <button id="selection-move" type="button" class="button-secondary" hidden>선택 항목 이동</button>
+                    <button id="selection-delete" type="button" class="button-secondary" hidden>선택 항목 영구 삭제</button>
+                }
+                <button id="selection-retry" type="button" class="button-secondary" hidden>범위 다시 확인</button>
+                <button id="selection-clear" type="button" class="button-secondary" disabled>선택 해제</button>
+            </div>
+            @if (canManage)
+            {
+                <span id="move-drag-status" class="storage-selection__feedback" role="status" aria-live="polite"></span>
+            }
+        </div>
+        @if (canManage)
+        {
+            <dialog id="delete-selection-dialog" class="storage-dialog" aria-labelledby="delete-selection-title" aria-describedby="delete-selection-warning">
+                <h2 id="delete-selection-title">선택 항목 영구 삭제</h2>
+                <p id="delete-selection-warning">선택한 폴더의 하위 항목까지 삭제합니다. 삭제한 파일은 복원할 수 없고 연결된 공유는 무효화됩니다.</p>
+                <dl class="storage-delete-impact">
+                    <div><dt>폴더</dt><dd id="delete-folder-count">—</dd></div>
+                    <div><dt>파일</dt><dd id="delete-file-count">—</dd></div>
+                    <div><dt>파일 크기</dt><dd id="delete-size">—</dd></div>
+                    <div><dt>무효화할 공유</dt><dd id="delete-share-count">—</dd></div>
+                </dl>
+                <label class="storage-delete-confirm"><input id="delete-selection-confirm" type="checkbox" /><span>위 영향과 복원 불가를 확인했습니다.</span></label>
+                <p id="delete-selection-status" class="field-help" role="status" aria-live="polite"></p>
+                <div class="storage-dialog__buttons">
+                    <button id="delete-selection-cancel" type="button" class="button-secondary">취소</button>
+                    <button id="delete-selection-refresh" type="button" class="button-secondary" hidden>영향 다시 확인</button>
+                    <button id="delete-selection-submit" type="button" class="button-primary" disabled>영구 삭제</button>
+                </div>
+            </dialog>
+        }
+        <section id="storage-list" class="storage-list" aria-labelledby="storage-list-title" aria-describedby="selection-help" tabindex="0" data-folder-id="@Model.Folder.Id">
             <h1 id="storage-list-title" class="visually-hidden">@(Model.Folder.Path.Last().Id is null ? "공용 저장소" : Model.Folder.Path.Last().Name) 파일 목록</h1>
             <div class="storage-list-head" aria-hidden="true"><span>이름</span><span>크기</span><span>등록일</span><span>작업</span></div>
             @foreach (var folder in Model.Folder.Children)
             {
-                <div class="storage-row">
-                    <a class="storage-row__name" href="/Files?folderId=@folder.Id">
+                <div class="storage-row" role="group" aria-label="폴더 @folder.Name" tabindex="0" draggable="@(canManage ? "true" : "false")" data-selection-kind="folder" data-selection-id="@folder.Id" data-open-url="/Files?folderId=@folder.Id" data-drop-destination="@folder.Id" data-path-ids="@(tree.First(node => node.Folder.Id == folder.Id).Ids)">
+                    <div class="storage-row__name">
+                        <label class="storage-row__select"><input type="checkbox" aria-label="@folder.Name 선택" /></label>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5h7l2 2h11v12H2z" /></svg><span>@folder.Name</span>
-                    </a>
+                    </div>
                     <span class="storage-row__size" data-label="크기">—</span>
                     <time class="storage-row__date" datetime="@folder.CreatedUtc.ToString("O")">@folder.CreatedUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm")</time>
                     <div class="storage-row__action">
@@ -118,10 +163,11 @@
             }
             @foreach (var file in Model.Items)
             {
-                <div class="storage-row">
-                    <a class="storage-row__name" href="/Files?handler=Download&amp;id=@file.Id">
+                <div class="storage-row" role="group" aria-label="파일 @file.OriginalName" tabindex="0" draggable="@(canManage ? "true" : "false")" data-selection-kind="file" data-selection-id="@file.Id" data-open-url="/Files?handler=Download&amp;id=@file.Id">
+                    <div class="storage-row__name">
+                        <label class="storage-row__select"><input type="checkbox" aria-label="@file.OriginalName 선택" /></label>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2h9l5 5v15H5zM14 2v6h5M8 13h8M8 17h6" /></svg><span>@file.OriginalName</span>
-                    </a>
+                    </div>
                     <span class="storage-row__size" data-label="크기">@file.SizeBytes.ToString("N0") B</span>
                     <time class="storage-row__date" datetime="@file.CreatedUtc.ToString("O")">@file.CreatedUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm")</time>
                     <div class="storage-row__action">
@@ -180,6 +226,7 @@
             {
                 <p class="empty-state">이 폴더는 비어 있습니다.</p>
             }
+            <div id="selection-marquee" class="storage-marquee" hidden aria-hidden="true"></div>
         </section>
 
         @if (canManage && Model.DeletingItems.Count > 0)
@@ -206,6 +253,346 @@
 </div>
 
 <script>
+    (() => {
+        const list = document.getElementById("storage-list");
+        const rows = [...list.querySelectorAll("[data-selection-id]")];
+        const toolbar = document.getElementById("selection-toolbar");
+        const count = document.getElementById("selection-count");
+        const scope = document.getElementById("selection-scope");
+        const download = document.getElementById("selection-download");
+        const downloadZip = document.getElementById("selection-download-zip");
+        const downloadStatus = document.getElementById("selection-download-status");
+        const retry = document.getElementById("selection-retry");
+        const marquee = document.getElementById("selection-marquee");
+        const deleteButton = document.getElementById("selection-delete");
+        const deleteDialog = document.getElementById("delete-selection-dialog");
+        const deleteConfirm = document.getElementById("delete-selection-confirm");
+        const deleteSubmit = document.getElementById("delete-selection-submit");
+        const deleteStatus = document.getElementById("delete-selection-status");
+        const deleteRefresh = document.getElementById("delete-selection-refresh");
+        let deleteToken = null;
+        let deletingSelection = false;
+        let selected = new Set();
+        let anchor = null;
+        let request = null;
+        let summaryTimer;
+        let drag = null;
+        let ignoreClick = false;
+
+        function paintSelection(updateToolbar = true) {
+            for (const row of rows) {
+                const checked = selected.has(row);
+                row.classList.toggle("is-selected", checked);
+                row.querySelector('.storage-row__select input').checked = checked;
+            }
+            if (!updateToolbar) return;
+            document.getElementById("selection-clear").disabled = selected.size === 0;
+            count.textContent = `직접 선택 ${selected.size.toLocaleString()}개`;
+        }
+
+        function selectionData() {
+            const data = new URLSearchParams({ folderId: list.dataset.folderId });
+            for (const row of selected) data.append(row.dataset.selectionKind === "folder" ? "folderIds" : "fileIds", row.dataset.selectionId);
+            return data;
+        }
+
+        async function loadSummary() {
+            const currentRequest = new AbortController();
+            request = currentRequest;
+            try {
+                const response = await fetch("/Files?handler=SelectionSummary", {
+                    method: "POST",
+                    headers: { "RequestVerificationToken": toolbar.querySelector('input[name="__RequestVerificationToken"]').value },
+                    body: selectionData(),
+                    signal: currentRequest.signal
+                });
+                const result = await response.json();
+                if (request !== currentRequest || currentRequest.signal.aborted) return;
+                if (!response.ok) throw new Error(result.message || "선택 범위를 확인할 수 없습니다.");
+                count.textContent = `직접 선택 ${result.directCount.toLocaleString()}개`;
+                scope.textContent = `하위 포함 · 폴더 ${result.folderCount.toLocaleString()}개 · 파일 ${result.fileCount.toLocaleString()}개`;
+                const only = selected.size === 1 ? [...selected][0] : null;
+                if (only?.dataset.selectionKind === "file") {
+                    download.href = only.dataset.openUrl;
+                    download.hidden = false;
+                } else downloadZip.hidden = false;
+            } catch (error) {
+                if (request !== currentRequest || currentRequest.signal.aborted) return;
+                scope.textContent = error instanceof SyntaxError || error instanceof TypeError
+                    ? "선택 범위를 확인하지 못했습니다. 연결과 로그인 상태를 확인한 뒤 다시 시도하세요."
+                    : error.message;
+                retry.hidden = false;
+            }
+        }
+
+        function updateSelection() {
+            clearTimeout(summaryTimer);
+            request?.abort();
+            request = null;
+            paintSelection();
+            download.hidden = true;
+            download.removeAttribute("href");
+            downloadZip.hidden = true;
+            downloadStatus.hidden = true;
+            downloadStatus.textContent = "";
+            retry.hidden = true;
+            scope.textContent = selected.size ? "하위 포함 범위 확인 중…" : "하위 포함 · 폴더 0개 · 파일 0개";
+            const move = document.getElementById("selection-move");
+            if (move) move.hidden = selected.size === 0;
+            if (deleteButton) deleteButton.hidden = selected.size === 0;
+            if (deleteDialog?.open) deleteDialog.close();
+            if (selected.size) summaryTimer = setTimeout(loadSummary, 120);
+        }
+
+        if (deleteButton) {
+            const verificationToken = toolbar.querySelector('input[name="__RequestVerificationToken"]').value;
+            async function previewDelete() {
+                deleteButton.disabled = true;
+                deleteConfirm.checked = false;
+                deleteSubmit.disabled = true;
+                deleteRefresh.hidden = true;
+                deleteToken = null;
+                deleteStatus.textContent = "삭제 영향을 확인하는 중…";
+                try {
+                    const response = await fetch("/Files?handler=DeletePreview", {
+                        method: "POST",
+                        headers: { "RequestVerificationToken": verificationToken },
+                        body: selectionData()
+                    });
+                    const result = response.headers.get("Content-Type")?.includes("application/json") ? await response.json() : null;
+                    if (!response.ok) throw new Error(result?.message || "삭제 영향을 확인하지 못했습니다.");
+                    deleteToken = result.previewToken;
+                    document.getElementById("delete-folder-count").textContent = `${result.folderCount.toLocaleString()}개`;
+                    document.getElementById("delete-file-count").textContent = `${result.fileCount.toLocaleString()}개`;
+                    document.getElementById("delete-size").textContent = `${result.totalBytes.toLocaleString()} B`;
+                    document.getElementById("delete-share-count").textContent = `${result.shareCount.toLocaleString()}개`;
+                    deleteStatus.textContent = "영향을 확인한 뒤 영구 삭제를 선택하세요.";
+                    deleteSubmit.disabled = !deleteConfirm.checked;
+                } catch (error) {
+                    deleteStatus.textContent = error instanceof Error ? error.message : "삭제 영향을 확인하지 못했습니다.";
+                    deleteRefresh.hidden = false;
+                } finally {
+                    deleteButton.disabled = false;
+                }
+            }
+            deleteButton.addEventListener("click", () => {
+                if (!selected.size || deleteDialog.open) return;
+                deleteDialog.showModal();
+                void previewDelete();
+            });
+            deleteDialog.addEventListener("close", () => {
+                deleteToken = null;
+                deleteConfirm.checked = false;
+                deleteSubmit.disabled = true;
+            });
+            deleteConfirm.addEventListener("change", () => {
+                deleteSubmit.disabled = !deleteConfirm.checked || !deleteToken || deletingSelection;
+            });
+            deleteRefresh.addEventListener("click", () => void previewDelete());
+            document.getElementById("delete-selection-cancel").addEventListener("click", () => {
+                if (!deletingSelection) deleteDialog.close();
+            });
+            deleteSubmit.addEventListener("click", async () => {
+                if (!deleteToken || !deleteConfirm.checked || deletingSelection) return;
+                deletingSelection = true;
+                deleteSubmit.disabled = true;
+                deleteStatus.textContent = "영구 삭제 처리 중…";
+                const data = selectionData();
+                data.set("previewToken", deleteToken);
+                try {
+                    const response = await fetch("/Files?handler=DeleteSelection", {
+                        method: "POST",
+                        headers: { "RequestVerificationToken": verificationToken },
+                        body: data
+                    });
+                    const result = response.headers.get("Content-Type")?.includes("application/json") ? await response.json() : null;
+                    if (response.status === 409) {
+                        deleteToken = null;
+                        deleteConfirm.checked = false;
+                        deleteRefresh.hidden = false;
+                        deleteStatus.textContent = result?.message || "삭제 영향이 변경됐습니다. 다시 확인하세요.";
+                        return;
+                    }
+                    if (!response.ok) throw new Error(result?.message || "영구 삭제를 완료하지 못했습니다.");
+                    const deletedFiles = result.deletedFileCount.toLocaleString();
+                    const deletedFolders = result.deletedFolderCount.toLocaleString();
+                    const retryFiles = result.retryFileCount.toLocaleString();
+                    const remainingFolders = result.remainingFolderCount.toLocaleString();
+                    const message = result.partial
+                        ? `파일 ${deletedFiles}개와 폴더 ${deletedFolders}개를 삭제했습니다. 파일 ${retryFiles}개는 아래 삭제 재시도가 필요하며 폴더 ${remainingFolders}개가 남았습니다. 파일 재시도 후 남은 폴더를 선택해 영향을 다시 확인하세요.`
+                        : `파일 ${deletedFiles}개와 폴더 ${deletedFolders}개를 영구 삭제했습니다.`;
+                    sessionStorage.setItem("hankan-delete-result", message);
+                    location.reload();
+                } catch (error) {
+                    deleteStatus.textContent = error instanceof Error ? error.message : "영구 삭제를 완료하지 못했습니다.";
+                    deleteRefresh.hidden = false;
+                    deleteToken = null;
+                    deleteConfirm.checked = false;
+                } finally {
+                    deletingSelection = false;
+                    deleteSubmit.disabled = true;
+                }
+            });
+            const previousResult = sessionStorage.getItem("hankan-delete-result");
+            if (previousResult) {
+                sessionStorage.removeItem("hankan-delete-result");
+                const notice = document.createElement("p");
+                notice.className = "storage-notice";
+                notice.setAttribute("role", "status");
+                notice.textContent = previousResult;
+                toolbar.before(notice);
+            }
+        }
+
+        function selectRow(row, event, toggle = false) {
+            if (event.shiftKey && anchor !== null) {
+                const first = rows.indexOf(anchor);
+                const last = rows.indexOf(row);
+                if (!event.ctrlKey && !event.metaKey) selected.clear();
+                for (const item of rows.slice(Math.min(first, last), Math.max(first, last) + 1)) selected.add(item);
+            } else {
+                if (toggle || event.ctrlKey || event.metaKey) {
+                    if (selected.has(row)) selected.delete(row);
+                    else selected.add(row);
+                } else selected = new Set([row]);
+                anchor = row;
+            }
+            updateSelection();
+        }
+
+        function clearSelection() {
+            selected.clear();
+            anchor = null;
+            updateSelection();
+        }
+
+        document.getElementById("selection-clear").addEventListener("click", () => {
+            clearSelection();
+            list.focus();
+        });
+        retry.addEventListener("click", updateSelection);
+        downloadZip.addEventListener("click", async () => {
+            if (!selected.size || downloadZip.disabled) return;
+            downloadZip.disabled = true;
+            downloadStatus.hidden = false;
+            downloadStatus.textContent = "ZIP 준비 중…";
+            try {
+                const response = await fetch("/Files?handler=DownloadSelection", {
+                    method: "POST",
+                    headers: { "RequestVerificationToken": toolbar.querySelector('input[name="__RequestVerificationToken"]').value },
+                    body: selectionData()
+                });
+                if (!response.ok || !response.headers.get("Content-Type")?.includes("application/zip")) {
+                    const error = response.headers.get("Content-Type")?.includes("application/json") ? await response.json() : null;
+                    throw new Error(error?.message || "ZIP을 받을 수 없습니다. 로그인과 선택 항목을 확인한 뒤 다시 시도하세요.");
+                }
+                const url = URL.createObjectURL(await response.blob());
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = "HANKAN-selection.zip";
+                document.body.append(link);
+                link.click();
+                link.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                downloadStatus.textContent = "ZIP 다운로드를 시작했습니다.";
+            } catch (error) {
+                downloadStatus.textContent = error instanceof TypeError || error?.name === "AbortError"
+                    ? "ZIP 전송이 중단됐습니다. 연결과 저장소 상태를 확인한 뒤 다시 시도하세요."
+                    : error instanceof Error ? error.message : "ZIP 다운로드를 완료하지 못했습니다.";
+            } finally {
+                downloadZip.disabled = false;
+            }
+        });
+        list.addEventListener("click", event => {
+            if (ignoreClick) { ignoreClick = false; return; }
+            if (event.target.closest(".storage-row__action")) return;
+            const row = event.target.closest("[data-selection-id]");
+            if (!row) return;
+            if (event.target.closest(".storage-row__select")) {
+                if (event.target.matches("input")) selectRow(row, event, true);
+                return;
+            }
+            row.focus({ preventScroll: true });
+            selectRow(row, event);
+        });
+        list.addEventListener("dblclick", event => {
+            if (event.target.closest(".storage-row__action, .storage-row__select")) return;
+            const row = event.target.closest("[data-selection-id]");
+            if (row) location.assign(row.dataset.openUrl);
+        });
+        list.addEventListener("keydown", event => {
+            if (event.target.closest(".storage-row__action")) return;
+            const row = event.target.closest("[data-selection-id]");
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+                event.preventDefault();
+                selected = new Set(rows);
+                anchor = row || rows[0] || null;
+                updateSelection();
+            } else if (event.key === "Escape") {
+                event.preventDefault();
+                clearSelection();
+            } else if (event.key === "Enter" && row) {
+                event.preventDefault();
+                location.assign(row.dataset.openUrl);
+            } else if (event.key === " " && row && !event.target.matches("input")) {
+                event.preventDefault();
+                selectRow(row, event, true);
+            } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                const next = rows[Math.max(0, Math.min(rows.length - 1, rows.indexOf(row) + (event.key === "ArrowDown" ? 1 : -1)))];
+                if (next) {
+                    next.focus();
+                    if (!event.ctrlKey && !event.metaKey) selectRow(next, event);
+                }
+            }
+        });
+
+        list.addEventListener("pointerdown", event => {
+            if (event.pointerType !== "mouse" || event.button !== 0 || event.target.closest(".storage-row, .storage-list-head")) return;
+            ignoreClick = false;
+            clearTimeout(summaryTimer);
+            request?.abort();
+            drag = { id: event.pointerId, x: event.pageX, y: event.pageY, original: new Set(selected), additive: event.ctrlKey || event.metaKey, moved: false };
+            list.setPointerCapture(event.pointerId);
+            list.focus({ preventScroll: true });
+            event.preventDefault();
+        });
+        list.addEventListener("pointermove", event => {
+            if (!drag || event.pointerId !== drag.id) return;
+            if (!drag.moved && Math.hypot(event.pageX - drag.x, event.pageY - drag.y) < 4) return;
+            drag.moved = true;
+            const left = Math.min(drag.x, event.pageX);
+            const top = Math.min(drag.y, event.pageY);
+            const right = Math.max(drag.x, event.pageX);
+            const bottom = Math.max(drag.y, event.pageY);
+            marquee.hidden = false;
+            Object.assign(marquee.style, { left: `${left - scrollX}px`, top: `${top - scrollY}px`, width: `${right - left}px`, height: `${bottom - top}px` });
+            selected = new Set(drag.additive ? drag.original : []);
+            for (const row of rows) {
+                const rect = row.getBoundingClientRect();
+                if (rect.right + scrollX > left && rect.left + scrollX < right && rect.bottom + scrollY > top && rect.top + scrollY < bottom) selected.add(row);
+            }
+            paintSelection(false);
+        });
+        function finishDrag(event) {
+            if (!drag || event.pointerId !== drag.id) return;
+            const finished = drag;
+            drag = null;
+            marquee.hidden = true;
+            if (list.hasPointerCapture(event.pointerId)) list.releasePointerCapture(event.pointerId);
+            if (event.type === "pointercancel" || event.type === "lostpointercapture") selected = finished.original;
+            else if (!finished.moved && !finished.additive) selected.clear();
+            ignoreClick = finished.moved;
+            setTimeout(() => { ignoreClick = false; }, 0);
+            anchor = [...selected][0] || null;
+            updateSelection();
+        }
+        list.addEventListener("pointerup", finishDrag);
+        list.addEventListener("pointercancel", finishDrag);
+        list.addEventListener("lostpointercapture", finishDrag);
+        window.addEventListener("pagehide", clearSelection);
+        window.addEventListener("pageshow", event => { if (event.persisted) clearSelection(); });
+    })();
     if (matchMedia("(max-width: 800px)").matches) {
         document.querySelector('.storage-tree-link[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
@@ -235,6 +622,7 @@
     <dialog id="move-dialog" class="storage-dialog" aria-labelledby="move-title">
         <h2 id="move-title">이동할 위치 선택</h2>
         <p>선택한 <span id="move-kind"></span>: <strong id="move-item"></strong></p>
+        <p id="move-scope" class="field-help" hidden>선택한 폴더의 하위 항목도 함께 이동합니다.</p>
         <form method="post" id="move-form">
             @Html.AntiForgeryToken()
             <input type="hidden" name="folderId" value="@Model.Folder.Id" />
@@ -277,18 +665,80 @@
         const moveForm = document.getElementById("move-form");
         const moveWarning = document.getElementById("move-warning");
         const moveSubmit = document.getElementById("move-submit");
+        const list = document.getElementById("storage-list");
+        const dragStatus = document.getElementById("move-drag-status");
+        const moveButton = document.getElementById("selection-move");
         let moving = null;
+        let dragRoots = null;
+        let dropTarget = null;
+        let movePending = false;
+        function selectedRows() {
+            return [...list.querySelectorAll(".storage-row.is-selected")];
+        }
+        function moveData(roots, destination) {
+            const data = new URLSearchParams({ folderId: list.dataset.folderId, destinationId: destination });
+            for (const row of roots) data.append(row.dataset.selectionKind === "folder" ? "folderIds" : "fileIds", row.dataset.selectionId);
+            return data;
+        }
+        function destinationProblem(roots, destination, pathIds) {
+            if (destination === list.dataset.folderId) return "이미 이 위치에 있습니다. 다른 폴더를 선택하세요.";
+            const ancestors = pathIds.split(",");
+            if (roots.some(row => row.dataset.selectionKind === "folder" && ancestors.includes(row.dataset.selectionId)))
+                return "폴더를 자기 자신이나 하위 폴더로 이동할 수 없습니다.";
+            return "";
+        }
+        async function moveSelection(roots, destination) {
+            if (movePending) return;
+            movePending = true;
+            moveSubmit.disabled = true;
+            dragStatus.textContent = "선택 항목 이동 중…";
+            let failureMessage = null;
+            try {
+                const response = await fetch("/Files?handler=MoveSelection", {
+                    method: "POST",
+                    headers: { "RequestVerificationToken": moveForm.querySelector('input[name="__RequestVerificationToken"]').value },
+                    body: moveData(roots, destination)
+                });
+                const result = response.headers.get("Content-Type")?.includes("application/json") ? await response.json() : null;
+                if (!response.ok) throw new Error(result?.message || "이동하지 못했습니다. 로그인과 선택 항목을 다시 확인하세요.");
+                location.reload();
+            } catch (error) {
+                failureMessage = error instanceof Error ? error.message : "이동하지 못했습니다. 다시 시도하세요.";
+                dragStatus.textContent = failureMessage;
+            } finally {
+                movePending = false;
+                updateDestination();
+                if (failureMessage) moveWarning.textContent = failureMessage;
+            }
+        }
         function updateDestination() {
+            if (!moving) return;
             const choice = moveForm.querySelector('input[name="destinationChoice"]:checked');
             const destination = choice.value;
             const path = choice.closest("label").dataset.path;
-            const descendant = moving.kind === "folder" && choice.closest("label").dataset.pathIds.split(",").includes(moving.id);
-            const sameLocation = destination === moving.parentId;
+            const pathIds = choice.closest("label").dataset.pathIds;
+            const problem = moving.kind === "selection"
+                ? destinationProblem(moving.roots, destination, pathIds)
+                : moving.kind === "folder" && pathIds.split(",").includes(moving.id)
+                    ? "폴더를 자기 자신이나 하위 폴더로 이동할 수 없습니다."
+                    : destination === moving.parentId ? "이미 이 위치에 있습니다. 다른 폴더를 선택하세요." : "";
             document.getElementById("move-destination").value = destination;
             document.getElementById("move-path").textContent = path;
-            moveWarning.textContent = descendant ? "폴더를 자기 자신이나 하위 폴더로 이동할 수 없습니다." : sameLocation ? "이미 이 위치에 있습니다. 다른 폴더를 선택하세요." : "";
-            moveSubmit.disabled = descendant || sameLocation;
+            moveWarning.textContent = problem;
+            moveSubmit.disabled = Boolean(problem) || movePending;
         }
+        moveButton.addEventListener("click", () => {
+            const roots = selectedRows();
+            if (!roots.length) return;
+            moving = { kind: "selection", roots };
+            document.getElementById("move-id").value = "";
+            document.getElementById("move-kind").textContent = "항목";
+            document.getElementById("move-item").textContent = `${roots.length.toLocaleString()}개 (폴더 ${roots.filter(row => row.dataset.selectionKind === "folder").length.toLocaleString()}개 · 파일 ${roots.filter(row => row.dataset.selectionKind === "file").length.toLocaleString()}개)`;
+            document.getElementById("move-scope").hidden = !roots.some(row => row.dataset.selectionKind === "folder");
+            moveForm.querySelector('input[name="destinationChoice"][value="' + list.dataset.folderId + '"]').checked = true;
+            updateDestination();
+            moveDialog.showModal();
+        });
         for (const button of document.querySelectorAll("[data-move]")) {
             button.addEventListener("click", () => {
                 moving = button.dataset;
@@ -297,6 +747,7 @@
                 document.getElementById("move-id").value = moving.id;
                 document.getElementById("move-kind").textContent = moving.kind === "folder" ? "폴더" : "파일";
                 document.getElementById("move-item").textContent = moving.name;
+                document.getElementById("move-scope").hidden = true;
                 const initial = moveForm.querySelector('input[name="destinationChoice"][value="' + moving.parentId + '"]');
                 (initial || moveForm.querySelector('input[name="destinationChoice"]')).checked = true;
                 updateDestination();
@@ -308,7 +759,58 @@
         }
         moveForm.addEventListener("submit", event => {
             updateDestination();
-            if (moveSubmit.disabled) event.preventDefault();
+            if (moveSubmit.disabled) { event.preventDefault(); return; }
+            if (moving.kind === "selection") {
+                event.preventDefault();
+                void moveSelection(moving.roots, document.getElementById("move-destination").value);
+            }
+        });
+        function clearDropTarget() {
+            dropTarget?.classList.remove("is-drop-target", "is-drop-blocked");
+            dropTarget = null;
+        }
+        list.addEventListener("dragstart", event => {
+            const row = event.target.closest(".storage-row[data-selection-id]");
+            if (!row || event.target.closest(".storage-row__select, .storage-row__action")) {
+                event.preventDefault();
+                return;
+            }
+            dragRoots = row.classList.contains("is-selected") ? selectedRows() : [row];
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", `${dragRoots.length}개 항목 이동`);
+            dragStatus.textContent = `${dragRoots.length.toLocaleString()}개 항목을 폴더로 끌어 이동합니다.`;
+        });
+        document.addEventListener("dragover", event => {
+            if (!dragRoots) return;
+            const target = event.target.closest("[data-drop-destination]");
+            if (target !== dropTarget) {
+                clearDropTarget();
+                dropTarget = target;
+            }
+            if (!target || event.target.closest(".storage-row__select, .storage-row__action")) return;
+            event.preventDefault();
+            const problem = destinationProblem(dragRoots, target.dataset.dropDestination, target.dataset.pathIds);
+            target.classList.toggle("is-drop-target", !problem);
+            target.classList.toggle("is-drop-blocked", Boolean(problem));
+            event.dataTransfer.dropEffect = problem ? "none" : "move";
+            dragStatus.textContent = problem || `${dragRoots.length.toLocaleString()}개 항목을 이 폴더로 이동합니다.`;
+        });
+        document.addEventListener("drop", event => {
+            if (!dragRoots) return;
+            const target = event.target.closest("[data-drop-destination]");
+            if (!target) return;
+            event.preventDefault();
+            const problem = destinationProblem(dragRoots, target.dataset.dropDestination, target.dataset.pathIds);
+            const roots = dragRoots;
+            dragRoots = null;
+            clearDropTarget();
+            if (problem) { dragStatus.textContent = problem; return; }
+            moving = { kind: "selection", roots };
+            void moveSelection(roots, target.dataset.dropDestination);
+        });
+        list.addEventListener("dragend", () => {
+            dragRoots = null;
+            clearDropTarget();
         });
         const input = document.getElementById("upload-file");
         const button = document.getElementById("upload-button");
