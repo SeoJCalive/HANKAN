@@ -12,7 +12,7 @@
     <title>@ViewData["Title"] · 한칸(HANKAN)</title>
     <link rel="stylesheet" href="/css/site.css" />
 </head>
-<body>
+<body class="@(ViewData["StorageLayout"] is true ? "storage-page" : "")">
     <header class="site-header">
         <div class="site-header__inner">
             <span class="brand">HAN:KAN</span>

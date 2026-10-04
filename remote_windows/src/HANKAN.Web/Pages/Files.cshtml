@@ -1,101 +1,262 @@
 @page
 @model HANKAN.Web.Pages.FilesModel
 @{
-    ViewData["Title"] = "공용 파일";
-    ViewData["Phase"] = "STORAGE / 공용 파일";
+    ViewData["Title"] = "공용 저장소";
+    ViewData["Phase"] = "STORAGE / 공용 저장소";
+    ViewData["StorageLayout"] = true;
+    var canManage = Model.Current?.IsAdmin == true || Model.Current?.State == "owner";
+    var tree = new List<(HANKAN.Web.StoredFolder Folder, int Depth, string Path, string Ids)>();
+    void AddChildren(string? parentId, int depth, string path, string ids)
+    {
+        foreach (var child in Model.Folder!.Tree.Where(item => item.ParentId == parentId))
+        {
+            var childPath = path + " / " + child.Name;
+            var childIds = ids + "," + child.Id;
+            tree.Add((child, depth, childPath, childIds));
+            AddChildren(child.Id, depth + 1, childPath, childIds);
+        }
+    }
+    AddChildren(null, 1, "공용 저장소", "");
 }
-<section class="intro" aria-labelledby="page-title">
-    <p class="eyebrow">HANKAN / FILES</p>
-    <h1 id="page-title">공용 파일</h1>
-    <p class="lead">승인된 사용자가 파일을 확인하고 다운로드합니다.</p>
-    <p class="file-usage">사용 @Model.UsedBytes.ToString("N0") B / 전체 @Model.QuotaBytes.ToString("N0") B · 남은 용량 @Math.Max(0, Model.QuotaBytes - Model.UsedBytes).ToString("N0") B</p>
-</section>
-@if (Model.DeleteMessage is not null)
-{
-    <p class="field-help" role="status">@Model.DeleteMessage</p>
-}
-@if (Model.Current?.IsAdmin == true || Model.Current?.State == "owner")
-{
-    <section class="file-upload" aria-labelledby="upload-title">
-        <h2 id="upload-title">파일 업로드</h2>
-        <div class="file-upload__controls">
-            <label for="upload-file">업로드할 파일</label>
-            <input id="upload-file" type="file" required />
-            <button id="upload-button" type="button" class="button-primary">업로드</button>
+<div class="storage-shell">
+    <aside class="storage-sidebar" aria-label="폴더 탐색">
+        <h2>폴더</h2>
+        <nav aria-label="저장소 폴더">
+            <a class="storage-tree-link @(Model.Folder!.Id is null ? "is-current" : "")" href="/Files" aria-current="@(Model.Folder.Id is null ? "page" : null)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5h7l2 2h11v12H2z" /></svg><span>공용 저장소</span>
+            </a>
+            @foreach (var node in tree)
+            {
+                <a class="storage-tree-link @(Model.Folder.Id == node.Folder.Id ? "is-current" : "")" style="--tree-depth:@node.Depth" href="/Files?folderId=@node.Folder.Id" aria-current="@(Model.Folder.Id == node.Folder.Id ? "page" : null)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5h7l2 2h11v12H2z" /></svg><span>@node.Folder.Name</span>
+                </a>
+            }
+        </nav>
+    </aside>
+
+    <div class="storage-main">
+        <nav class="storage-breadcrumb" aria-label="현재 폴더 경로">
+            @for (var index = 0; index < Model.Folder.Path.Count; index++)
+            {
+                var crumb = Model.Folder.Path[index];
+                if (index > 0) { <span aria-hidden="true">/</span> }
+                if (index == Model.Folder.Path.Count - 1)
+                {
+                    <span aria-current="page">@(crumb.Id is null ? "공용 저장소" : crumb.Name)</span>
+                }
+                else
+                {
+                    <a href="/Files@(crumb.Id is null ? "" : "?folderId=" + crumb.Id)">@(crumb.Id is null ? "공용 저장소" : crumb.Name)</a>
+                }
+            }
+        </nav>
+
+        <div class="storage-toolbar">
+            @if (canManage)
+            {
+                <div class="storage-toolbar__actions">
+                    <button type="button" class="button-primary" id="new-folder-button">새 폴더</button>
+                    <button type="button" class="button-secondary" id="upload-open-button">파일 업로드</button>
+                </div>
+            }
+            else
+            {
+                <p class="storage-role">보기 권한 · 폴더 탐색과 다운로드 가능</p>
+            }
+            <p class="storage-quota">사용 @Model.UsedBytes.ToString("N0") B / 전체 @Model.QuotaBytes.ToString("N0") B</p>
         </div>
+
+        @if (Model.DeleteMessage is not null)
+        {
+            <p class="storage-notice" role="status">@Model.DeleteMessage</p>
+        }
+        <section class="storage-list" aria-labelledby="storage-list-title">
+            <h1 id="storage-list-title" class="visually-hidden">@(Model.Folder.Path.Last().Id is null ? "공용 저장소" : Model.Folder.Path.Last().Name) 파일 목록</h1>
+            <div class="storage-list-head" aria-hidden="true"><span>이름</span><span>크기</span><span>등록일</span><span>작업</span></div>
+            @foreach (var folder in Model.Folder.Children)
+            {
+                <div class="storage-row">
+                    <a class="storage-row__name" href="/Files?folderId=@folder.Id">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5h7l2 2h11v12H2z" /></svg><span>@folder.Name</span>
+                    </a>
+                    <span class="storage-row__size" data-label="크기">—</span>
+                    <time class="storage-row__date" datetime="@folder.CreatedUtc.ToString("O")">@folder.CreatedUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm")</time>
+                    <div class="storage-row__action">
+                        @if (canManage)
+                        {
+                            <details class="storage-menu">
+                                <summary aria-label="@folder.Name 작업 메뉴">···</summary>
+                                <div class="storage-menu__panel">
+                                    <a href="/Files?folderId=@folder.Id">열기</a>
+                                    <details class="storage-subaction">
+                                        <summary>이름 변경</summary>
+                                        <form method="post" action="/Files?handler=RenameFolder">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="folderId" value="@Model.Folder.Id" />
+                                            <input type="hidden" name="id" value="@folder.Id" />
+                                            <label>새 이름 <input name="name" value="@folder.Name" required maxlength="255" /></label>
+                                            <button type="submit" class="button-secondary">변경</button>
+                                        </form>
+                                    </details>
+                                    <button type="button" class="storage-menu__item" data-move data-kind="folder" data-id="@folder.Id" data-name="@folder.Name" data-parent-id="@(Model.Folder.Id ?? "")">이동</button>
+                                    <details class="storage-subaction">
+                                        <summary>삭제</summary>
+                                        <form method="post" action="/Files?handler=DeleteFolder">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="folderId" value="@Model.Folder.Id" />
+                                            <input type="hidden" name="id" value="@folder.Id" />
+                                            <p>빈 폴더만 삭제할 수 있습니다.</p>
+                                            <button type="submit" class="button-secondary">빈 폴더 삭제</button>
+                                        </form>
+                                    </details>
+                                </div>
+                            </details>
+                        }
+                        else { <a href="/Files?folderId=@folder.Id" aria-label="@folder.Name 열기">열기</a> }
+                    </div>
+                </div>
+            }
+            @foreach (var file in Model.Items)
+            {
+                <div class="storage-row">
+                    <a class="storage-row__name" href="/Files?handler=Download&amp;id=@file.Id">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2h9l5 5v15H5zM14 2v6h5M8 13h8M8 17h6" /></svg><span>@file.OriginalName</span>
+                    </a>
+                    <span class="storage-row__size" data-label="크기">@file.SizeBytes.ToString("N0") B</span>
+                    <time class="storage-row__date" datetime="@file.CreatedUtc.ToString("O")">@file.CreatedUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm")</time>
+                    <div class="storage-row__action">
+                        @if (canManage)
+                        {
+                            <details class="storage-menu">
+                                <summary aria-label="@file.OriginalName 작업 메뉴">···</summary>
+                                <div class="storage-menu__panel">
+                                    <a href="/Files?handler=Download&amp;id=@file.Id">다운로드</a>
+                                    <details class="storage-subaction">
+                                        <summary>이름 변경</summary>
+                                        <form method="post" action="/Files?handler=RenameFile">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="folderId" value="@Model.Folder.Id" />
+                                            <input type="hidden" name="id" value="@file.Id" />
+                                            <label>새 이름 <input name="name" value="@file.OriginalName" required maxlength="255" /></label>
+                                            <button type="submit" class="button-secondary">변경</button>
+                                        </form>
+                                    </details>
+                                    <button type="button" class="storage-menu__item" data-move data-kind="file" data-id="@file.Id" data-name="@file.OriginalName" data-parent-id="@(Model.Folder.Id ?? "")">이동</button>
+                                    <details class="storage-subaction">
+                                        <summary>링크 공유</summary>
+                                        <form method="post" action="/Shares?handler=Create" class="share-create-form" onsubmit="return this.elements['Mode'].value !== 'public' || confirm('공개 목록에 이 파일의 이름이 표시됩니다. 게시하시겠습니까?');">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="FileId" value="@file.Id" />
+                                            <input type="hidden" name="ExpiresUtc" class="expiry-utc" />
+                                            <label>만료 시각 <input type="datetime-local" class="expiry-local" required /></label>
+                                            <label>비밀번호 (선택) <input type="password" name="Password" minlength="8" maxlength="128" autocomplete="new-password" /></label>
+                                            @if (Model.Current?.IsAdmin == true)
+                                            {
+                                                <label>공유 방식 <select name="Mode"><option value="link">링크 전용</option><option value="public">공개 목록</option></select></label>
+                                            }
+                                            else { <input type="hidden" name="Mode" value="link" /> }
+                                            <button type="submit" class="button-secondary">공유 만들기</button>
+                                        </form>
+                                    </details>
+                                    <details class="storage-subaction">
+                                        <summary>영구 삭제</summary>
+                                        <form method="post" action="/Files?handler=Delete" class="delete-form">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="id" value="@file.Id" />
+                                            <input type="hidden" name="folderId" value="@Model.Folder.Id" />
+                                            <p>복원할 수 없으며 연결된 공유가 무효화됩니다.</p>
+                                            <label><input type="checkbox" name="confirmation" value="delete" required /> 영향을 확인했습니다.</label>
+                                            <button type="submit" class="button-secondary">영구 삭제 확인</button>
+                                        </form>
+                                    </details>
+                                </div>
+                            </details>
+                        }
+                        else { <a href="/Files?handler=Download&amp;id=@file.Id" aria-label="@file.OriginalName 다운로드">다운로드</a> }
+                    </div>
+                </div>
+            }
+            @if (Model.Folder.Children.Count == 0 && Model.Items.Count == 0)
+            {
+                <p class="empty-state">이 폴더는 비어 있습니다.</p>
+            }
+        </section>
+
+        @if (canManage && Model.DeletingItems.Count > 0)
+        {
+            <section class="storage-retry" aria-labelledby="delete-state">
+                <h2 id="delete-state">삭제 재시도 필요 · @Model.DeletingItems.Count.ToString("N0")개</h2>
+                <p class="field-help">위치와 관계없이 삭제 처리 중인 파일입니다. 완료 전에는 파일과 공유에 접근할 수 없고 용량을 사용합니다.</p>
+                @foreach (var file in Model.DeletingItems)
+                {
+                    <div class="storage-retry__row">
+                        <span>@file.OriginalName</span>
+                        <form method="post" action="/Files?handler=Delete">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="id" value="@file.Id" />
+                            <input type="hidden" name="folderId" value="@Model.Folder.Id" />
+                            <input type="hidden" name="confirmation" value="delete" />
+                            <button type="submit" class="button-secondary">삭제 재시도</button>
+                        </form>
+                    </div>
+                }
+            </section>
+        }
+    </div>
+</div>
+
+<script>
+    if (matchMedia("(max-width: 800px)").matches) {
+        document.querySelector('.storage-tree-link[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+</script>
+
+@if (canManage)
+{
+    <dialog id="new-folder-dialog" class="storage-dialog" aria-labelledby="new-folder-title">
+        <h2 id="new-folder-title">새 폴더</h2>
+        <p>현재 위치: @string.Join(" / ", Model.Folder.Path.Select(crumb => crumb.Id is null ? "공용 저장소" : crumb.Name))</p>
+        <form method="post" action="/Files?handler=CreateFolder">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="folderId" value="@Model.Folder.Id" />
+            <label>폴더 이름 <input name="name" required maxlength="255" /></label>
+            <div class="storage-dialog__buttons"><button type="button" class="button-secondary" data-close-dialog>취소</button><button type="submit" class="button-primary">폴더 만들기</button></div>
+        </form>
+    </dialog>
+    <dialog id="upload-dialog" class="storage-dialog" aria-labelledby="upload-title">
+        <h2 id="upload-title">파일 업로드</h2>
+        <p>현재 위치: @string.Join(" / ", Model.Folder.Path.Select(crumb => crumb.Id is null ? "공용 저장소" : crumb.Name))</p>
+        <label>업로드할 파일 <input id="upload-file" type="file" required /></label>
         @Html.AntiForgeryToken()
         <p class="field-help">파일당 100 MB 미만 · 최대 99,999,999바이트</p>
         <p id="upload-status" class="field-help" role="status" aria-live="polite"></p>
-    </section>
-}
-<section class="status-section" aria-labelledby="file-state">
-    <div class="section-heading"><h2 id="file-state">파일 목록</h2><span>@(Model.Items.Count)개</span></div>
-    @if (Model.Items.Count == 0)
-    {
-        <p class="empty-state">아직 등록된 파일이 없습니다.</p>
-    }
-    else
-    {
-        <div class="file-list">
-            @foreach (var file in Model.Items)
-            {
-                <div class="file-row">
-                    <div class="file-row__name">@file.OriginalName</div>
-                    <div class="file-row__meta">@file.SizeBytes.ToString("N0") B · @file.UploaderEmail · @file.CreatedUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm")</div>
-                    <a class="button-secondary file-row__download" href="/Files?handler=Download&amp;id=@file.Id">다운로드</a>
-                </div>
-                @if (Model.Current?.IsAdmin == true || Model.Current?.State == "owner")
+        <div class="storage-dialog__buttons"><button type="button" class="button-secondary" data-close-dialog>취소</button><button id="upload-button" type="button" class="button-primary">업로드</button></div>
+    </dialog>
+    <dialog id="move-dialog" class="storage-dialog" aria-labelledby="move-title">
+        <h2 id="move-title">이동할 위치 선택</h2>
+        <p>선택한 <span id="move-kind"></span>: <strong id="move-item"></strong></p>
+        <form method="post" id="move-form">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="folderId" value="@Model.Folder.Id" />
+            <input type="hidden" name="id" id="move-id" />
+            <input type="hidden" name="destinationId" id="move-destination" />
+            <fieldset class="storage-destinations">
+                <legend>목적지 폴더</legend>
+                <label class="storage-destinations__item" data-path="공용 저장소" data-path-ids="">
+                    <input type="radio" name="destinationChoice" value="" checked /><span>공용 저장소</span>
+                </label>
+                @foreach (var node in tree)
                 {
-                    <details class="delete-confirm">
-                        <summary>영구 삭제</summary>
-                        <form method="post" action="/Files?handler=Delete" class="delete-form">
-                            @Html.AntiForgeryToken()
-                            <input type="hidden" name="id" value="@file.Id" />
-                            <p>이 파일은 복원할 수 없으며 연결된 모든 공유가 무효화됩니다.</p>
-                            <label><input type="checkbox" name="confirmation" value="delete" required /> 영향을 확인했습니다.</label>
-                            <button type="submit" class="button-secondary">영구 삭제 확인</button>
-                        </form>
-                    </details>
-                    <form method="post" action="/Shares?handler=Create" class="share-create-form" onsubmit="return this.elements['Mode'].value !== 'public' || confirm('공개 목록에 이 파일의 이름이 표시됩니다. 게시하시겠습니까?');">
-                        @Html.AntiForgeryToken()
-                        <input type="hidden" name="FileId" value="@file.Id" />
-                        <input type="hidden" name="ExpiresUtc" class="expiry-utc" />
-                        <label>만료 시각 <input type="datetime-local" class="expiry-local" required /></label>
-                        <label>비밀번호 (선택) <input type="password" name="Password" minlength="8" maxlength="128" autocomplete="new-password" /></label>
-                        @if (Model.Current?.IsAdmin == true)
-                        {
-                            <label>공유 방식 <select name="Mode"><option value="link">링크 전용</option><option value="public">공개 목록</option></select></label>
-                        }
-                        else { <input type="hidden" name="Mode" value="link" /> }
-                        <button type="submit" class="button-secondary">공유 만들기</button>
-                    </form>
+                    <label class="storage-destinations__item" style="--tree-depth:@node.Depth" data-path="@node.Path" data-path-ids="@node.Ids">
+                        <input type="radio" name="destinationChoice" value="@node.Folder.Id" /><span>@node.Folder.Name</span>
+                    </label>
                 }
-            }
-        </div>
-    }
-</section>
-@if (Model.DeletingItems.Count > 0)
-{
-    <section class="status-section" aria-labelledby="delete-state">
-        <div class="section-heading"><h2 id="delete-state">삭제 재시도 필요</h2><span>@(Model.DeletingItems.Count)개</span></div>
-        <p class="field-help">삭제가 완료될 때까지 파일과 공유에 접근할 수 없으며 용량은 계속 사용됩니다.</p>
-        @foreach (var file in Model.DeletingItems)
-        {
-            <div class="file-row">
-                <div class="file-row__name">@file.OriginalName</div>
-                <div class="file-row__meta">@file.SizeBytes.ToString("N0") B · 삭제 처리 중</div>
-                <form method="post" action="/Files?handler=Delete">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden" name="id" value="@file.Id" />
-                    <input type="hidden" name="confirmation" value="delete" />
-                    <button type="submit" class="button-secondary">삭제 재시도</button>
-                </form>
-            </div>
-        }
-    </section>
-}
-@if (Model.Current?.IsAdmin == true || Model.Current?.State == "owner")
-{
+            </fieldset>
+            <p>선택한 위치 <strong id="move-path">공용 저장소</strong></p>
+            <p id="move-warning" class="field-help" role="status" aria-live="polite"></p>
+            <div class="storage-dialog__buttons"><button type="button" class="button-secondary" data-close-dialog>취소</button><button type="submit" id="move-submit" class="button-primary">여기로 이동</button></div>
+        </form>
+    </dialog>
     <script>
         for (const form of document.querySelectorAll(".share-create-form")) {
             const local = form.querySelector(".expiry-local");
@@ -105,6 +266,50 @@
                 form.querySelector(".expiry-utc").value = new Date(local.value).toISOString();
             });
         }
+        const folderDialog = document.getElementById("new-folder-dialog");
+        const uploadDialog = document.getElementById("upload-dialog");
+        const moveDialog = document.getElementById("move-dialog");
+        document.getElementById("new-folder-button").addEventListener("click", () => folderDialog.showModal());
+        document.getElementById("upload-open-button").addEventListener("click", () => uploadDialog.showModal());
+        for (const button of document.querySelectorAll("[data-close-dialog]")) {
+            button.addEventListener("click", () => button.closest("dialog").close());
+        }
+        const moveForm = document.getElementById("move-form");
+        const moveWarning = document.getElementById("move-warning");
+        const moveSubmit = document.getElementById("move-submit");
+        let moving = null;
+        function updateDestination() {
+            const choice = moveForm.querySelector('input[name="destinationChoice"]:checked');
+            const destination = choice.value;
+            const path = choice.closest("label").dataset.path;
+            const descendant = moving.kind === "folder" && choice.closest("label").dataset.pathIds.split(",").includes(moving.id);
+            const sameLocation = destination === moving.parentId;
+            document.getElementById("move-destination").value = destination;
+            document.getElementById("move-path").textContent = path;
+            moveWarning.textContent = descendant ? "폴더를 자기 자신이나 하위 폴더로 이동할 수 없습니다." : sameLocation ? "이미 이 위치에 있습니다. 다른 폴더를 선택하세요." : "";
+            moveSubmit.disabled = descendant || sameLocation;
+        }
+        for (const button of document.querySelectorAll("[data-move]")) {
+            button.addEventListener("click", () => {
+                moving = button.dataset;
+                button.closest(".storage-menu").open = false;
+                moveForm.action = "/Files?handler=" + (moving.kind === "folder" ? "MoveFolder" : "MoveFile");
+                document.getElementById("move-id").value = moving.id;
+                document.getElementById("move-kind").textContent = moving.kind === "folder" ? "폴더" : "파일";
+                document.getElementById("move-item").textContent = moving.name;
+                const initial = moveForm.querySelector('input[name="destinationChoice"][value="' + moving.parentId + '"]');
+                (initial || moveForm.querySelector('input[name="destinationChoice"]')).checked = true;
+                updateDestination();
+                moveDialog.showModal();
+            });
+        }
+        for (const choice of moveForm.querySelectorAll('input[name="destinationChoice"]')) {
+            choice.addEventListener("change", updateDestination);
+        }
+        moveForm.addEventListener("submit", event => {
+            updateDestination();
+            if (moveSubmit.disabled) event.preventDefault();
+        });
         const input = document.getElementById("upload-file");
         const button = document.getElementById("upload-button");
         const status = document.getElementById("upload-status");
@@ -115,12 +320,13 @@
             const data = new FormData();
             data.append("file", input.files[0]);
             try {
-                const response = await fetch("/FileUpload", {
+                const folderId = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Folder.Id));
+                const response = await fetch("/FileUpload" + (folderId === null ? "" : "?folderId=" + encodeURIComponent(folderId)), {
                     method: "POST",
-                    headers: { "RequestVerificationToken": document.querySelector('input[name="__RequestVerificationToken"]').value },
+                    headers: { "RequestVerificationToken": uploadDialog.querySelector('input[name="__RequestVerificationToken"]').value },
                     body: data
                 });
-                if (response.ok) { location.assign("/Files"); return; }
+                if (response.ok) { location.assign("/Files" + (folderId === null ? "" : "?folderId=" + encodeURIComponent(folderId))); return; }
                 status.textContent = await response.text();
             } catch { status.textContent = "연결이 끊겼습니다. 다시 시도하세요."; }
             button.disabled = false;

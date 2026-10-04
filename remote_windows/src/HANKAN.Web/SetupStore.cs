@@ -12,7 +12,7 @@ public enum SetupState { Unconfigured, Ready, RecoveryRequired }
 public sealed class SetupStore
 {
     private const int ApplicationId = 1397966930;
-    private const int SchemaVersion = 5;
+    private const int SchemaVersion = 6;
     private readonly string contentRoot;
     private readonly string dataDirectory;
     private readonly string databasePath;
@@ -177,6 +177,8 @@ public sealed class SetupStore
                     UpgradeV3(connection);
                 if (ScalarLong(connection, "PRAGMA user_version;") == 4)
                     UpgradeV4(connection);
+                if (ScalarLong(connection, "PRAGMA user_version;") == 5)
+                    UpgradeV5(connection);
                 return;
             }
             var known = ScalarLong(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';");
@@ -189,7 +191,7 @@ public sealed class SetupStore
             db.SaveChanges();
             using var initialized = Open();
             using var command = initialized.CreateCommand();
-            command.CommandText = "PRAGMA application_id = 1397966930; PRAGMA user_version = 5;";
+            command.CommandText = "PRAGMA application_id = 1397966930; PRAGMA user_version = 6;";
             command.ExecuteNonQuery();
             File.WriteAllText(markerPath, "HANKAN instance\n");
         }
@@ -297,6 +299,29 @@ public sealed class SetupStore
                 "Result" = CASE WHEN "Action" LIKE '%.failed' THEN 'failure' ELSE 'success' END;
             CREATE INDEX "IX_AuditEvents_CreatedUtc" ON "AuditEvents" ("CreatedUtc", "Id");
             PRAGMA user_version = 5;
+            """;
+        command.ExecuteNonQuery();
+        transaction.Commit();
+    }
+
+    private static void UpgradeV5(SqliteConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            CREATE TABLE "Folders" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_Folders" PRIMARY KEY,
+                "ParentId" TEXT NULL,
+                "Name" TEXT COLLATE NOCASE NOT NULL,
+                "CreatedUtc" TEXT NOT NULL
+            );
+            CREATE INDEX "IX_Folders_ParentId" ON "Folders" ("ParentId");
+            CREATE UNIQUE INDEX "IX_Folders_Root_Name" ON "Folders" ("Name") WHERE "ParentId" IS NULL;
+            CREATE UNIQUE INDEX "IX_Folders_Parent_Name" ON "Folders" ("ParentId", "Name") WHERE "ParentId" IS NOT NULL;
+            ALTER TABLE "StoredFiles" ADD COLUMN "FolderId" TEXT NULL;
+            CREATE INDEX "IX_StoredFiles_FolderId" ON "StoredFiles" ("FolderId");
+            PRAGMA user_version = 6;
             """;
         command.ExecuteNonQuery();
         transaction.Commit();

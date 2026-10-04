@@ -7,38 +7,46 @@ using Microsoft.Net.Http.Headers;
 
 namespace HANKAN.Web.Pages;
 
-public sealed class FilesModel(AccessStore access, FileStore files, FileTransferGate gate, SignInManager<AppUser> signIn, AuditStore audit) : PageModel
+public sealed class FilesModel(AccessStore access, FileStore files, FolderStore folders, FileTransferGate gate, SignInManager<AppUser> signIn, AuditStore audit) : PageModel
 {
     public AccountAccess? Current { get; private set; }
     public List<StoredFile> Items { get; private set; } = [];
+    public FolderView? Folder { get; private set; }
     public List<StoredFile> DeletingItems { get; private set; } = [];
     public long UsedBytes { get; private set; }
     public long QuotaBytes { get; private set; }
     public string? DeleteMessage { get; private set; }
 
-    public async Task<IActionResult> OnGetAsync()
+    public async Task<IActionResult> OnGetAsync(string? folderId)
     {
+        if (Request.Query.ContainsKey("folderId") && folderId is null) return NotFound();
         Current = await access.CurrentAsync(User);
         if (Current is null) return RedirectToPage("/Login");
-        await LoadAsync();
+        if (!await LoadAsync(folderId)) return NotFound();
         return Page();
     }
 
-    public async Task<IActionResult> OnPostDeleteAsync(string id, string? confirmation)
+    public async Task<IActionResult> OnPostDeleteAsync(string id, string? confirmation, string? folderId)
     {
         Current = await access.CurrentAsync(User);
-        if (Current is null || !Current.IsAdmin && Current.State != "owner") return Forbid();
+        if (Current is null || !Current.IsAdmin && Current.State != "owner")
+        {
+            await audit.RecordAsync(User, "file.delete", id, "denied");
+            return StatusCode(403);
+        }
+        if (await folders.ReadAsync(folderId) is null) return BadRequest("올바른 폴더를 선택하세요.");
         if (confirmation != "delete") DeleteMessage = "복원 불가와 연결 공유 무효화를 확인하세요.";
         else
         {
             var actorId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (actorId is null) return Forbid();
+            if (actorId is null) return StatusCode(403);
             var result = await files.DeleteAsync(id, actorId);
             if (result == FileDeleteResult.Forbidden)
             {
                 await audit.RecordAsync(User, "file.delete", null, "denied");
-                return Forbid();
+                return StatusCode(403);
             }
+            if (result == FileDeleteResult.Deleted) return Redirect(FolderUrl(folderId));
             DeleteMessage = result switch
             {
                 FileDeleteResult.Deleted => "파일과 연결 공유를 영구 삭제했습니다.",
@@ -46,16 +54,91 @@ public sealed class FilesModel(AccessStore access, FileStore files, FileTransfer
                 _ => "삭제할 수 있는 파일을 찾을 수 없습니다."
             };
         }
-        await LoadAsync();
+        if (!await LoadAsync(folderId)) return BadRequest("올바른 폴더를 선택하세요.");
         return Page();
     }
 
-    private async Task LoadAsync()
+    public Task<IActionResult> OnPostCreateFolderAsync(string? folderId, string? name) =>
+        ChangeFolderAsync("create", folderId, null, name, null);
+
+    public Task<IActionResult> OnPostRenameFolderAsync(string? folderId, string? id, string? name) =>
+        ChangeFolderAsync("rename", folderId, id, name, null);
+
+    public Task<IActionResult> OnPostMoveFolderAsync(string? folderId, string? id, string? destinationId) =>
+        ChangeFolderAsync("move", folderId, id, null, destinationId);
+
+    public Task<IActionResult> OnPostDeleteFolderAsync(string? folderId, string? id) =>
+        ChangeFolderAsync("delete", folderId, id, null, null);
+
+    public Task<IActionResult> OnPostRenameFileAsync(string? folderId, string? id, string? name) =>
+        ChangeFileAsync("rename", folderId, id, name, null);
+
+    public Task<IActionResult> OnPostMoveFileAsync(string? folderId, string? id, string? destinationId) =>
+        ChangeFileAsync("move", folderId, id, null, destinationId);
+
+    private async Task<IActionResult> ChangeFolderAsync(string action, string? folderId, string? id, string? name, string? destinationId)
     {
-        Items = await files.ListAsync();
+        var current = await access.CurrentAsync(User);
+        if (current is null || !current.IsAdmin && current.State != "owner")
+        {
+            await audit.RecordAsync(User, "folder." + action, id, "denied");
+            return StatusCode(403);
+        }
+        if (await folders.ReadAsync(folderId) is null) return BadRequest("올바른 폴더를 선택하세요.");
+        var actorId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (actorId is null) return StatusCode(403);
+        var result = action switch
+        {
+            "create" => await folders.CreateAsync(folderId, name, actorId),
+            "rename" => await folders.RenameAsync(id ?? "", name, actorId),
+            "move" => await folders.MoveAsync(id ?? "", destinationId, actorId),
+            "delete" => await folders.DeleteAsync(id ?? "", actorId),
+            _ => FolderChangeResult.Invalid
+        };
+        return result switch
+        {
+            FolderChangeResult.Success => Redirect(FolderUrl(folderId)),
+            FolderChangeResult.Forbidden => StatusCode(403),
+            _ => BadRequest("폴더 작업을 완료할 수 없습니다. 이름·위치·내용을 확인하세요.")
+        };
+    }
+
+    private async Task<IActionResult> ChangeFileAsync(string action, string? folderId, string? id, string? name, string? destinationId)
+    {
+        var current = await access.CurrentAsync(User);
+        if (current is null || !current.IsAdmin && current.State != "owner")
+        {
+            await audit.RecordAsync(User, "file." + action, id, "denied");
+            return StatusCode(403);
+        }
+        if (await folders.ReadAsync(folderId) is null) return BadRequest("올바른 폴더를 선택하세요.");
+        var actorId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (actorId is null) return StatusCode(403);
+        var result = action switch
+        {
+            "rename" => await files.RenameAsync(id ?? "", name, actorId),
+            "move" => await files.MoveAsync(id ?? "", destinationId, actorId),
+            _ => FileChangeResult.Invalid
+        };
+        return result switch
+        {
+            FileChangeResult.Success => Redirect(FolderUrl(folderId)),
+            FileChangeResult.Forbidden => StatusCode(403),
+            _ => BadRequest("파일 이름이나 이동 위치를 확인하세요.")
+        };
+    }
+
+    private static string FolderUrl(string? id) => id is null ? "/Files" : "/Files?folderId=" + id;
+
+    private async Task<bool> LoadAsync(string? folderId)
+    {
+        Folder = await folders.ReadAsync(folderId);
+        if (Folder is null) return false;
+        Items = await files.ListAsync(folderId);
         if (Current?.IsAdmin == true || Current?.State == "owner")
             DeletingItems = await files.ListDeletingAsync();
         (UsedBytes, QuotaBytes) = await files.UsageAsync();
+        return true;
     }
 
     public async Task<IActionResult> OnGetDownloadAsync(string id)

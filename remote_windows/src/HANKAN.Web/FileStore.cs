@@ -11,6 +11,7 @@ public sealed class FileTransferGate
 }
 
 public enum FileDeleteResult { Deleted, RetryNeeded, Forbidden, NotFound }
+public enum FileChangeResult { Success, Invalid, Forbidden }
 
 public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGate gate, ILogger<FileStore> logger)
 {
@@ -40,13 +41,61 @@ public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGat
         }
     }
 
-    public async Task<List<StoredFile>> ListAsync() =>
-        await db.StoredFiles.AsNoTracking().Where(file => file.State == "available")
+    public async Task<List<StoredFile>> ListAsync(string? folderId) =>
+        await db.StoredFiles.AsNoTracking().Where(file => file.State == "available" && file.FolderId == folderId)
             .OrderByDescending(file => file.CreatedUtc).ToListAsync();
 
     public async Task<List<StoredFile>> ListDeletingAsync() =>
         await db.StoredFiles.AsNoTracking().Where(file => file.State == "deleting")
             .OrderByDescending(file => file.CreatedUtc).ToListAsync();
+
+    public Task<FileChangeResult> RenameAsync(string id, string? name, string actorId) =>
+        ChangeAsync("file.rename", id, name, null, actorId);
+
+    public Task<FileChangeResult> MoveAsync(string id, string? folderId, string actorId) =>
+        ChangeAsync("file.move", id, null, folderId, actorId);
+
+    private async Task<FileChangeResult> ChangeAsync(string action, string id, string? rawName, string? folderId, string actorId)
+    {
+        await gate.Transfer.WaitAsync();
+        try
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync();
+            await LockWritesAsync();
+            async Task<FileChangeResult> FinishAsync(FileChangeResult result)
+            {
+                db.AuditEvents.Add(new AuditEvent
+                {
+                    ActorId = actorId, Action = action, FileId = id, TargetId = id,
+                    Result = result == FileChangeResult.Success ? "success" : result == FileChangeResult.Forbidden ? "denied" : "failure"
+                });
+                await db.SaveChangesAsync();
+                await transaction.CommitAsync();
+                return result;
+            }
+            if (!await db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId && (user.IsAdmin || user.AccessState == "owner")))
+                return await FinishAsync(FileChangeResult.Forbidden);
+            if (!Guid.TryParseExact(id, "N", out _) || !FolderStore.ValidId(folderId))
+                return await FinishAsync(FileChangeResult.Invalid);
+            var file = await db.StoredFiles.SingleOrDefaultAsync(item => item.Id == id && item.State == "available");
+            if (file is null) return await FinishAsync(FileChangeResult.Invalid);
+            if (action == "file.rename")
+            {
+                var name = FolderStore.ValidName(rawName);
+                if (name is null) return await FinishAsync(FileChangeResult.Invalid);
+                file.OriginalName = name;
+            }
+            else
+            {
+                if (file.FolderId == folderId || folderId is not null &&
+                    !await db.Folders.AsNoTracking().AnyAsync(folder => folder.Id == folderId))
+                    return await FinishAsync(FileChangeResult.Invalid);
+                file.FolderId = folderId;
+            }
+            return await FinishAsync(FileChangeResult.Success);
+        }
+        finally { gate.Transfer.Release(); }
+    }
 
     public async Task<FileDeleteResult> DeleteAsync(string id, string actorId)
     {
@@ -134,28 +183,40 @@ public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGat
         return (used, quota);
     }
 
-    public async Task<string?> UploadAsync(Stream body, string rawName, string actorId, string actorEmail, CancellationToken cancellation)
+    public async Task<string?> UploadAsync(Stream body, string rawName, string actorId, string actorEmail, string? folderId, CancellationToken cancellation)
     {
         if (!OperatingSystem.IsWindows()) return "Windows에서만 파일을 저장할 수 있습니다.";
         var name = SafeName(rawName);
         if (name is null) return "올바른 파일 이름을 선택하세요.";
+        if (!FolderStore.ValidId(folderId)) return "올바른 폴더를 선택하세요.";
         var config = await db.Configurations.AsNoTracking().SingleAsync();
         if (config.FolderPath is null || config.QuotaBytes is null) return "저장소 설정을 확인하세요.";
-        var (used, quota) = await UsageAsync();
         var free = new DriveInfo(Path.GetPathRoot(config.FolderPath)!).AvailableFreeSpace;
-        var reservation = Math.Min(MaxFileBytes, Math.Min(quota - used, free - 1_048_576));
-        if (reservation <= 0) return "전체 용량 또는 디스크 여유 공간이 부족합니다.";
+        long reservation;
         var file = new StoredFile
         {
             Id = Guid.NewGuid().ToString("N"),
+            FolderId = folderId,
             StorageName = Guid.NewGuid().ToString("N"),
             OriginalName = name,
             UploaderId = actorId,
-            UploaderEmail = actorEmail,
-            ReservedBytes = reservation
+            UploaderEmail = actorEmail
         };
-        db.StoredFiles.Add(file);
-        await db.SaveChangesAsync(cancellation);
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellation))
+        {
+            await LockWritesAsync();
+            if (!await db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId && (user.IsAdmin || user.AccessState == "owner"), cancellation))
+                return "파일을 올릴 권한이 없습니다.";
+            if (folderId is not null && !await db.Folders.AsNoTracking().AnyAsync(folder => folder.Id == folderId, cancellation))
+                return "올바른 폴더를 선택하세요.";
+            var (used, quota) = await UsageAsync();
+            reservation = Math.Min(MaxFileBytes, Math.Min(quota - used, free - 1_048_576));
+            if (reservation <= 0) return "전체 용량 또는 디스크 여유 공간이 부족합니다.";
+            file.ReservedBytes = reservation;
+            db.StoredFiles.Add(file);
+            await db.SaveChangesAsync(cancellation);
+            await transaction.CommitAsync(cancellation);
+        }
         var path = Path.Combine(config.FolderPath, file.StorageName);
         var committed = false;
         var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);

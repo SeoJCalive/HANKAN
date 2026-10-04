@@ -23,6 +23,7 @@ public sealed class StorageConfiguration
 public sealed class StoredFile
 {
     public string Id { get; set; } = "";
+    public string? FolderId { get; set; }
     public string StorageName { get; set; } = "";
     public string OriginalName { get; set; } = "";
     public string UploaderId { get; set; } = "";
@@ -34,6 +35,14 @@ public sealed class StoredFile
     public byte[]? Nonce { get; set; }
     public byte[]? Tag { get; set; }
     public int FormatVersion { get; set; } = 1;
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class StoredFolder
+{
+    public string Id { get; set; } = "";
+    public string? ParentId { get; set; }
+    public string Name { get; set; } = "";
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 }
 
@@ -73,6 +82,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
 {
     public DbSet<StorageConfiguration> Configurations => Set<StorageConfiguration>();
     public DbSet<StoredFile> StoredFiles => Set<StoredFile>();
+    public DbSet<StoredFolder> Folders => Set<StoredFolder>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<ShareGrant> Shares => Set<ShareGrant>();
 
@@ -83,6 +93,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
         builder.Entity<StorageConfiguration>().ToTable("AppState").HasKey(state => state.Id);
         builder.Entity<StoredFile>().HasIndex(file => file.StorageName).IsUnique();
         builder.Entity<StoredFile>().HasIndex(file => file.State);
+        builder.Entity<StoredFile>().HasIndex(file => file.FolderId);
+        builder.Entity<StoredFolder>().ToTable("Folders");
+        builder.Entity<StoredFolder>().Property(folder => folder.Name).UseCollation("NOCASE");
+        builder.Entity<StoredFolder>().HasIndex(folder => folder.ParentId);
+        builder.Entity<StoredFolder>().HasIndex(folder => folder.Name).IsUnique().HasDatabaseName("IX_Folders_Root_Name")
+            .HasFilter("\"ParentId\" IS NULL");
+        builder.Entity<StoredFolder>().HasIndex(folder => new { folder.ParentId, folder.Name }).IsUnique()
+            .HasDatabaseName("IX_Folders_Parent_Name").HasFilter("\"ParentId\" IS NOT NULL");
         builder.Entity<AuditEvent>().HasIndex(item => new { item.CreatedUtc, item.Id });
         builder.Entity<ShareGrant>().HasIndex(share => share.TokenHash).IsUnique();
         builder.Entity<ShareGrant>().HasIndex(share => share.FileId);

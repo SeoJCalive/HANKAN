@@ -23,6 +23,7 @@ builder.Services.AddRazorPages(options =>
 });
 builder.Services.AddScoped<AccessStore>();
 builder.Services.AddScoped<FileStore>();
+builder.Services.AddScoped<FolderStore>();
 builder.Services.AddScoped<ShareStore>();
 builder.Services.AddScoped<AuditStore>();
 builder.Services.AddSingleton<FileTransferGate>();
@@ -61,6 +62,12 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     options.ExpireTimeSpan = TimeSpan.FromHours(8);
+    options.Events.OnRedirectToAccessDenied = context =>
+    {
+        if (context.Request.Method == "POST") context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        else context.Response.Redirect(context.RedirectUri);
+        return Task.CompletedTask;
+    };
 });
 builder.Services.AddSingleton<SetupStore>();
 builder.Services.AddRateLimiter(options =>
@@ -149,9 +156,9 @@ app.MapPost("/FileUpload", async (HttpContext context, IAntiforgery antiforgery,
     try
     {
         var current = await access.CurrentAsync(context.User);
-        if (current is null || !current.IsAdmin && current.State != "owner") return Results.Forbid();
+        if (current is null || !current.IsAdmin && current.State != "owner") return Results.StatusCode(403);
         var actorId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (actorId is null) return Results.Forbid();
+        if (actorId is null) return Results.StatusCode(403);
         var reader = new MultipartReader(boundary, context.Request.Body) { BodyLengthLimit = FileStore.MaxFileBytes };
         var section = await reader.ReadNextSectionAsync(context.RequestAborted);
         if (section is null || !ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var disposition) ||
@@ -167,7 +174,8 @@ app.MapPost("/FileUpload", async (HttpContext context, IAntiforgery antiforgery,
             await audit.RecordAsync(context.User, "file.upload", null, "failure");
             return Results.Text("파일 이름을 확인하세요.", statusCode: 400);
         }
-        var error = await files.UploadAsync(section.Body, name, actorId, current.Email, context.RequestAborted);
+        var folderId = context.Request.Query.TryGetValue("folderId", out var selectedFolder) ? selectedFolder.ToString() : null;
+        var error = await files.UploadAsync(section.Body, name, actorId, current.Email, folderId, context.RequestAborted);
         if (error is not null) await audit.RecordAsync(context.User, "file.upload", null, "failure");
         return error is null ? Results.Ok() : Results.Text(error, statusCode: 400);
     }
