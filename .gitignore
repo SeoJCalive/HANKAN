@@ -3,6 +3,7 @@
 **/.vs/
 **/.vscode/
 **/.idea/
+**/__pycache__/
 *.db
 *.db-shm
 *.db-wal
@@ -13,11 +14,7 @@
 .env
 .env.*
 .omo/
-/AGENTS.md
-/SecureShare-Spec.md
-/docs/
-/remote_windows/README.md
-/remote_windows/DESIGN.md
-/remote_windows/design/
-/remote_windows/.gitignore
-/remote_windows/qa/
+/README.dev.md
+/DESIGN.md
+/design/
+/qa/
