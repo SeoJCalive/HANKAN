@@ -10,7 +10,7 @@
 2. 저장소를 내려받은 뒤 PowerShell에서 다음 명령을 실행한다.
 
    ```powershell
-   dotnet run --project .\remote_windows\src\HANKAN.Web\HANKAN.Web.csproj
+   dotnet run --project .\src\HANKAN.Web\HANKAN.Web.csproj
    ```
 
 3. 서버 PC에서 `http://127.0.0.1:5180/`을 연다. 콘솔에 표시된 일회용 설정 코드를 입력하고 관리자 이메일·비밀번호, 비어 있는 전용 저장 폴더의 **Windows 절대 경로**, 전체 용량 한도를 지정한다.
