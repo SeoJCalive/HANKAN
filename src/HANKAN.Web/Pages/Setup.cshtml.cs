@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace HANKAN.Web.Pages;
@@ -22,6 +23,11 @@ public sealed class SetupModel(SetupStore store) : PageModel
     public async Task<IActionResult> OnPostAsync()
     {
         if (store.State != SetupState.Unconfigured) return OnGet();
+        if (ModelState.GetFieldValidationState(nameof(QuotaGiB)) == ModelValidationState.Invalid)
+        {
+            Error = "전체 용량은 1~1024 GiB의 정수로 입력하세요.";
+            return Page();
+        }
         Error = await store.ConfigureAsync(Code ?? "", Email ?? "", Password ?? "", FolderPath ?? "", QuotaGiB);
         return Error is null ? RedirectToPage("/Login") : Page();
     }

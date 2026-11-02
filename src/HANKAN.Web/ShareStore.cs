@@ -14,9 +14,10 @@ public sealed class ShareStore(AppDbContext db, SetupStore setup, FileTransferGa
         DateTime expiresUtc, string? password)
     {
         if (!OperatingSystem.IsWindows() || setup.State != SetupState.Ready || mode is not ("link" or "public")) return (null, "공유를 만들 수 없습니다.");
-        if (expiresUtc.Kind != DateTimeKind.Utc || expiresUtc <= DateTime.UtcNow.AddHours(1) ||
-            expiresUtc > DateTime.UtcNow.AddDays(30)) return (null, "만료 시각은 현재부터 1시간 초과, 30일 이내로 지정하세요.");
-        if (password is { Length: > 0 and < 8 or > 128 }) return (null, "공유 비밀번호는 8~128자로 입력하세요.");
+        var now = DateTime.UtcNow;
+        if (expiresUtc.Kind != DateTimeKind.Utc || expiresUtc <= now.AddHours(1) ||
+            expiresUtc > now.AddDays(7)) return (null, "만료 시각은 현재부터 1시간 초과, 7일 이내로 지정하세요.");
+        if (password is { Length: > 0 and < 12 or > 128 }) return (null, "공유 비밀번호는 12~128자로 입력하세요.");
         var actorId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
         if (actorId is null) return (null, "공유 권한을 확인하세요.");
         await using var transaction = await db.Database.BeginTransactionAsync();
