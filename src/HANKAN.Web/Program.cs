@@ -56,6 +56,7 @@ builder.Services.AddIdentity<AppUser, IdentityRole>(options =>
         options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(1);
     })
     .AddEntityFrameworkStores<AppDbContext>();
+builder.Services.Configure<PasswordHasherOptions>(options => options.IterationCount = 210_000);
 builder.Services.ConfigureApplicationCookie(options =>
 {
     options.LoginPath = "/Login";
@@ -65,6 +66,7 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     options.ExpireTimeSpan = TimeSpan.FromHours(8);
+    options.SlidingExpiration = false;
     options.Events.OnRedirectToAccessDenied = context =>
     {
         if (context.Request.Method == "POST") context.Response.StatusCode = StatusCodes.Status403Forbidden;

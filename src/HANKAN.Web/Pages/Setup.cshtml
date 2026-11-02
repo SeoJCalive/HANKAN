@@ -21,7 +21,7 @@
         <input id="admin-email" name="Email" type="email" autocomplete="username" value="@Model.Email" maxlength="254" required />
         <label for="admin-password">관리자 비밀번호</label>
         <input id="admin-password" name="Password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
-        <p class="field-help">12자 이상. 이 계정의 비밀번호는 자동 복구할 수 없습니다.</p>
+        <p class="field-help">12~128자. 이 계정의 비밀번호는 자동 복구할 수 없습니다.</p>
         <label for="storage-folder">파일 저장 폴더</label>
         <input id="storage-folder" name="FolderPath" type="text" value="@Model.FolderPath" placeholder="C:\HankanFiles" required />
         <p class="field-help">비어 있는 Windows 절대 경로를 지정하세요. 기존 파일은 자동 등록되지 않습니다.</p>
