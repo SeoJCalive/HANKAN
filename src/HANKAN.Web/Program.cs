@@ -108,6 +108,7 @@ var setup = app.Services.GetRequiredService<SetupStore>();
 if (setup.State == SetupState.Ready)
 {
     using var scope = app.Services.CreateScope();
+    await scope.ServiceProvider.GetRequiredService<AppDbContext>().PruneAuditAsync();
     await scope.ServiceProvider.GetRequiredService<FileStore>().RecoverAsync();
 }
 if (setup.State == SetupState.Unconfigured)

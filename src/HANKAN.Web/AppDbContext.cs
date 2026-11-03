@@ -1,6 +1,9 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace HANKAN.Web;
 
@@ -78,13 +81,233 @@ public sealed class ShareGrant
     public DateTime? BlockedUntilUtc { get; set; }
 }
 
-public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : IdentityDbContext<AppUser>(options)
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbContext> logger) : IdentityDbContext<AppUser>(options)
 {
     public DbSet<StorageConfiguration> Configurations => Set<StorageConfiguration>();
     public DbSet<StoredFile> StoredFiles => Set<StoredFile>();
     public DbSet<StoredFolder> Folders => Set<StoredFolder>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<ShareGrant> Shares => Set<ShareGrant>();
+
+    private const long AuditLimitBytes = 104857600L;
+    private const string AuditBytesSql = """
+        CASE WHEN "CreatedUtc" IS NULL THEN 0 ELSE
+          length(CAST(
+            substr("CreatedUtc",1,10) || 'T' || substr("CreatedUtc",12,8) || '.' ||
+            substr(substr("CreatedUtc",21) || '0000000',1,7) || 'Z'
+          AS BLOB))
+        END
+        + coalesce(length(CAST(CAST("Id" AS TEXT) AS BLOB)),0)
+        + coalesce(length(CAST("ActorId" AS BLOB)),0)
+        + coalesce(length(CAST("Action" AS BLOB)),0)
+        + coalesce(length(CAST("FileId" AS BLOB)),0)
+        + coalesce(length(CAST("TargetId" AS BLOB)),0)
+        + coalesce(length(CAST("Result" AS BLOB)),0)
+        """;
+    private const string AuditTotalsSql = $"""
+        SELECT count(*) AS "Rows", coalesce(sum({AuditBytesSql}),0) AS "LogicalBytes" FROM "AuditEvents"
+        """;
+    private const string AuditSizeDeleteSql = $"""
+        WITH sizes AS MATERIALIZED (
+          SELECT "Id", "CreatedUtc", {AuditBytesSql} AS bytes FROM "AuditEvents"
+        ), ordered AS (
+          SELECT "Id", bytes,
+            sum(bytes) OVER (
+              ORDER BY "CreatedUtc" ASC, "Id" ASC
+              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            ) AS running
+          FROM sizes
+        )
+        DELETE FROM "AuditEvents"
+        WHERE "Id" IN (
+          SELECT "Id" FROM ordered WHERE running - bytes < $excess
+        )
+        """;
+    private const string AuditPeriodDeleteSql = """DELETE FROM "AuditEvents" WHERE "CreatedUtc" < $cutoff""";
+
+    private sealed class AuditTotals
+    {
+        public long Rows { get; set; }
+        public long LogicalBytes { get; set; }
+    }
+
+    public override int SaveChanges() => SaveChanges(true);
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        SaveChangesAsync(true, cancellationToken);
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ChangeTracker.DetectChanges();
+        if (!ChangeTracker.Entries<AuditEvent>().Any(entry => entry.State == EntityState.Added))
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+
+        IDbContextTransaction? owned = null;
+        var transaction = Database.CurrentTransaction;
+        var savepoint = false;
+        var baseCompleted = false;
+        try
+        {
+            if (transaction is null) transaction = owned = Database.BeginTransaction();
+            else
+            {
+                transaction.CreateSavepoint("audit_retention");
+                savepoint = true;
+            }
+            var saved = base.SaveChanges(false);
+            baseCompleted = true;
+            var now = DateTime.UtcNow;
+            var cutoff = now.AddDays(-30);
+            var expiredDeleted = Database.ExecuteSqlRaw(AuditPeriodDeleteSql, new SqliteParameter("$cutoff", cutoff));
+            var totals = Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).Single();
+            var sizeDeleted = 0;
+            if (totals.LogicalBytes > AuditLimitBytes)
+            {
+                sizeDeleted = Database.ExecuteSqlRaw(AuditSizeDeleteSql,
+                    new SqliteParameter("$excess", totals.LogicalBytes - AuditLimitBytes));
+                totals = Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).Single();
+            }
+            if (owned is not null) owned.Commit();
+            else transaction.ReleaseSavepoint("audit_retention");
+            if (acceptAllChangesOnSuccess) ChangeTracker.AcceptAllChanges();
+            LogAuditRetention("save", now, cutoff, expiredDeleted, sizeDeleted, totals,
+                owned is not null ? "committed" : "enlisted");
+            return saved;
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                if (owned is not null) owned.Rollback();
+                else if (savepoint) transaction!.RollbackToSavepoint("audit_retention");
+            }
+            catch (Exception rollbackException)
+            {
+                logger.LogError(rollbackException, "Audit retention rollback failed trigger=save");
+            }
+            var discardedEntries = ChangeTracker.Entries().Count();
+            ChangeTracker.Clear();
+            logger.LogError(exception,
+                "Audit retention failed trigger=save phase={Phase} baseCompleted={BaseCompleted} trackerCleared=true discardedEntries={DiscardedEntries}",
+                baseCompleted ? "retention" : "base", baseCompleted, discardedEntries);
+            throw;
+        }
+        finally { owned?.Dispose(); }
+    }
+
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        ChangeTracker.DetectChanges();
+        if (!ChangeTracker.Entries<AuditEvent>().Any(entry => entry.State == EntityState.Added))
+            return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+
+        IDbContextTransaction? owned = null;
+        var transaction = Database.CurrentTransaction;
+        var savepoint = false;
+        var baseCompleted = false;
+        try
+        {
+            if (transaction is null) transaction = owned = await Database.BeginTransactionAsync(cancellationToken);
+            else
+            {
+                await transaction.CreateSavepointAsync("audit_retention", cancellationToken);
+                savepoint = true;
+            }
+            var saved = await base.SaveChangesAsync(false, cancellationToken);
+            baseCompleted = true;
+            var now = DateTime.UtcNow;
+            var cutoff = now.AddDays(-30);
+            var expiredDeleted = await Database.ExecuteSqlRawAsync(AuditPeriodDeleteSql,
+                [new SqliteParameter("$cutoff", cutoff)], cancellationToken);
+            var totals = await Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).SingleAsync(cancellationToken);
+            var sizeDeleted = 0;
+            if (totals.LogicalBytes > AuditLimitBytes)
+            {
+                sizeDeleted = await Database.ExecuteSqlRawAsync(AuditSizeDeleteSql,
+                    [new SqliteParameter("$excess", totals.LogicalBytes - AuditLimitBytes)], cancellationToken);
+                totals = await Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).SingleAsync(cancellationToken);
+            }
+            if (owned is not null) await owned.CommitAsync(cancellationToken);
+            else await transaction.ReleaseSavepointAsync("audit_retention", cancellationToken);
+            if (acceptAllChangesOnSuccess) ChangeTracker.AcceptAllChanges();
+            LogAuditRetention("save", now, cutoff, expiredDeleted, sizeDeleted, totals,
+                owned is not null ? "committed" : "enlisted");
+            return saved;
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                if (owned is not null) await owned.RollbackAsync(CancellationToken.None);
+                else if (savepoint) await transaction!.RollbackToSavepointAsync("audit_retention", CancellationToken.None);
+            }
+            catch (Exception rollbackException)
+            {
+                logger.LogError(rollbackException, "Audit retention rollback failed trigger=save");
+            }
+            var discardedEntries = ChangeTracker.Entries().Count();
+            ChangeTracker.Clear();
+            logger.LogError(exception,
+                "Audit retention failed trigger=save phase={Phase} baseCompleted={BaseCompleted} trackerCleared=true discardedEntries={DiscardedEntries}",
+                baseCompleted ? "retention" : "base", baseCompleted, discardedEntries);
+            throw;
+        }
+        finally
+        {
+            if (owned is not null) await owned.DisposeAsync();
+        }
+    }
+
+    public async Task PruneAuditAsync()
+    {
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            transaction = await Database.BeginTransactionAsync();
+            await Database.ExecuteSqlRawAsync("""UPDATE "AppState" SET "Id" = "Id" WHERE "Id" = 1""");
+            var now = DateTime.UtcNow;
+            var cutoff = now.AddDays(-30);
+            var expiredDeleted = await Database.ExecuteSqlRawAsync(AuditPeriodDeleteSql,
+                new SqliteParameter("$cutoff", cutoff));
+            var totals = await Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).SingleAsync();
+            var sizeDeleted = 0;
+            if (totals.LogicalBytes > AuditLimitBytes)
+            {
+                sizeDeleted = await Database.ExecuteSqlRawAsync(AuditSizeDeleteSql,
+                    new SqliteParameter("$excess", totals.LogicalBytes - AuditLimitBytes));
+                totals = await Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).SingleAsync();
+            }
+            await transaction.CommitAsync();
+            LogAuditRetention("startup", now, cutoff, expiredDeleted, sizeDeleted, totals, "committed");
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                if (transaction is not null) await transaction.RollbackAsync(CancellationToken.None);
+            }
+            catch (Exception rollbackException)
+            {
+                logger.LogError(rollbackException, "Audit retention rollback failed trigger=startup");
+            }
+            logger.LogError(exception, "Audit retention failed trigger=startup");
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
+    }
+
+    private void LogAuditRetention(string trigger, DateTime now, DateTime cutoff, long expiredDeleted,
+        long sizeDeleted, AuditTotals totals, string transactionState)
+    {
+        var dbFileBytes = new FileInfo(((SqliteConnection)Database.GetDbConnection()).DataSource).Length;
+        logger.LogInformation(
+            "Audit retention trigger={Trigger} utc={Utc} cutoff={Cutoff} expiredDeleted={ExpiredDeleted} sizeDeleted={SizeDeleted} rows={Rows} logicalBytes={LogicalBytes} dbFileBytes={DbFileBytes} transaction={TransactionState}",
+            trigger, now.ToString("O", CultureInfo.InvariantCulture), cutoff.ToString("O", CultureInfo.InvariantCulture),
+            expiredDeleted, sizeDeleted, totals.Rows, totals.LogicalBytes, dbFileBytes, transactionState);
+    }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -102,6 +325,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
         builder.Entity<StoredFolder>().HasIndex(folder => new { folder.ParentId, folder.Name }).IsUnique()
             .HasDatabaseName("IX_Folders_Parent_Name").HasFilter("\"ParentId\" IS NOT NULL");
         builder.Entity<AuditEvent>().HasIndex(item => new { item.CreatedUtc, item.Id });
+        builder.Entity<AuditEvent>().Property(item => item.CreatedUtc)
+            .HasConversion(value => value, value => DateTime.SpecifyKind(value, DateTimeKind.Utc));
         builder.Entity<ShareGrant>().HasIndex(share => share.TokenHash).IsUnique();
         builder.Entity<ShareGrant>().HasIndex(share => share.FileId);
     }
