@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
+using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Threading.RateLimiting;
@@ -13,6 +15,18 @@ using HANKAN.Web;
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 100_100_000);
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardedForHeaderName = "CF-Connecting-IP";
+    options.ForwardedProtoHeaderName = "X-Forwarded-Proto";
+    options.ForwardLimit = 1;
+    options.RequireHeaderSymmetry = true;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+    options.KnownProxies.Add(IPAddress.Loopback);
+});
 builder.Services.AddRazorPages(options =>
 {
     options.Conventions.AuthorizePage("/Access", "Member");
@@ -103,6 +117,17 @@ builder.Services.AddRateLimiter(options =>
     };
 });
 
+if (string.Equals(builder.Configuration["ForwardedHeaders_Enabled"], "true",
+    StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException(
+        "HANKAN_FORWARDING_AUTO_ENABLE_FORBIDDEN: ForwardedHeaders_Enabled=true.");
+}
+builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+{
+    ["ForwardedHeaders_Enabled"] = "false"
+});
+
 var app = builder.Build();
 var setup = app.Services.GetRequiredService<SetupStore>();
 if (setup.State == SetupState.Ready)
@@ -115,6 +140,17 @@ if (setup.State == SetupState.Unconfigured)
     Console.WriteLine($"한칸(HANKAN) 최초 설정 코드: {setup.SetupCode}");
 else if (setup.State == SetupState.RecoveryRequired)
     Console.Error.WriteLine("한칸(HANKAN) 데이터 또는 저장소를 확인할 수 없습니다. 복구가 필요합니다.");
+app.UseWhen(context =>
+{
+    var forwardedIp = context.Request.Headers["CF-Connecting-IP"];
+    var forwardedProto = context.Request.Headers["X-Forwarded-Proto"];
+    return IPAddress.Loopback.Equals(context.Connection.RemoteIpAddress)
+        && forwardedIp.Count == 1
+        && IPAddress.TryParse(forwardedIp[0], out _)
+        && forwardedProto.Count == 1
+        && (string.Equals(forwardedProto[0], "https", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(forwardedProto[0], "http", StringComparison.OrdinalIgnoreCase));
+}, branch => branch.UseForwardedHeaders());
 app.UseStaticFiles();
 app.Use(async (context, next) =>
 {
