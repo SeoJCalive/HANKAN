@@ -92,23 +92,39 @@ builder.Services.AddSingleton<SetupStore>();
 builder.Services.AddRateLimiter(options =>
 {
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-        context.Request.Method == "POST" && (context.Request.Path.Equals("/Login", StringComparison.OrdinalIgnoreCase) ||
-            context.Request.Path.Equals("/Register", StringComparison.OrdinalIgnoreCase) ||
-            context.Request.Path.Equals("/Access", StringComparison.OrdinalIgnoreCase))
-            ? RateLimitPartition.GetFixedWindowLimiter($"{context.Request.Path}:{context.Connection.RemoteIpAddress}", _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 5,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            })
-            : context.Request.Method == "POST" && context.Request.Path.StartsWithSegments("/Share")
-                ? RateLimitPartition.GetFixedWindowLimiter($"share:{context.Connection.RemoteIpAddress}", _ => new FixedWindowRateLimiterOptions
+    {
+        if (!HttpMethods.IsPost(context.Request.Method))
+            return RateLimitPartition.GetNoLimiter("other");
+
+        var path = context.Request.Path;
+        var ip = context.Connection.RemoteIpAddress;
+        var userId = context.User.Identity?.IsAuthenticated == true
+            ? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+            : null;
+        (string Key, int Limit, int Minutes)? policy =
+            path.Equals("/Login", StringComparison.OrdinalIgnoreCase)
+                ? ($"login:{ip}", 20, 1)
+            : path.Equals("/Register", StringComparison.OrdinalIgnoreCase)
+                ? ($"register:{ip}", 5, 10)
+            : path.Equals("/Access", StringComparison.OrdinalIgnoreCase)
+                ? ($"access:{ip}", 10, 1)
+            : path.StartsWithSegments("/Share", StringComparison.OrdinalIgnoreCase)
+                ? ($"share:{ip}", 30, 1)
+            : path.StartsWithSegments("/Shares", StringComparison.OrdinalIgnoreCase)
+                && userId is not null
+                ? ($"shares:{userId}", 30, 1)
+            : null;
+
+        return policy is { } selected
+            ? RateLimitPartition.GetFixedWindowLimiter(selected.Key, _ =>
+                new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = 10,
-                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = selected.Limit,
+                    Window = TimeSpan.FromMinutes(selected.Minutes),
                     QueueLimit = 0
                 })
-                : RateLimitPartition.GetNoLimiter("other"));
+            : RateLimitPartition.GetNoLimiter("other");
+    });
     options.OnRejected = async (context, _) =>
     {
         await context.HttpContext.RequestServices.GetRequiredService<AuditStore>()
@@ -165,8 +181,8 @@ app.Use(async (context, next) =>
     await next();
 });
 app.UseRouting();
-app.UseRateLimiter();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapPost("/FileUpload", async (HttpContext context, IAntiforgery antiforgery, AccessStore access,
     FileStore files, FileTransferGate gate, AuditStore audit) =>
