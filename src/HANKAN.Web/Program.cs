@@ -167,19 +167,20 @@ app.UseWhen(context =>
         && (string.Equals(forwardedProto[0], "https", StringComparison.OrdinalIgnoreCase)
             || string.Equals(forwardedProto[0], "http", StringComparison.OrdinalIgnoreCase));
 }, branch => branch.UseForwardedHeaders());
-app.UseStaticFiles();
 app.Use(async (context, next) =>
 {
+    context.Response.Headers.XContentTypeOptions = "nosniff";
+    context.Response.Headers.XFrameOptions = "DENY";
     if (context.Request.Path.StartsWithSegments("/Share") ||
         context.Request.Path.StartsWithSegments("/Shares") ||
         context.Request.Path.StartsWithSegments("/Public"))
     {
         context.Response.Headers["Referrer-Policy"] = "no-referrer";
         context.Response.Headers.CacheControl = "no-store";
-        context.Response.Headers.XContentTypeOptions = "nosniff";
     }
     await next();
 });
+app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
 app.UseRateLimiter();
