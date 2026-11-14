@@ -65,9 +65,7 @@ public sealed class SetupStore
                     CryptographicOperations.ZeroMemory(plain);
                     reader.Close();
                     if (!validProbe) return SetupState.RecoveryRequired;
-                    byte[]? protectedKey;
-                    try { protectedKey = AuditChain.ReadProtectedKey(connection); }
-                    catch (AuditIntegrityException) { return SetupState.Ready; }
+                    var protectedKey = AuditChain.ReadProtectedKey(connection);
                     if (protectedKey is null) return SetupState.RecoveryRequired;
                     var key = AuditChain.RestoreKey(protectedKey, auditKeys);
                     CryptographicOperations.ZeroMemory(key);

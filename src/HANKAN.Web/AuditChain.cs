@@ -191,11 +191,16 @@ public static class AuditChain
         return state;
     }
 
-    // Setup keeps genuine DPAPI recovery failures distinct from malformed audit metadata.
+    // Setup reads only the key column: a missing or empty key needs recovery, while other
+    // malformed state values stay Ready so the verification screen can report them.
     public static byte[]? ReadProtectedKey(SqliteConnection connection)
     {
-        var rows = ReadRows(connection, null, "AuditChainState");
-        return rows.Count == 1 ? ReadState(rows[0]).ProtectedHmacKey : null;
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT ProtectedHmacKey FROM AuditChainState LIMIT 2";
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+        var key = reader.GetValue(0) as byte[];
+        return reader.Read() || key is not { Length: > 0 } ? null : key;
     }
 
     public static List<AuditReadEvent> ReadEvents(AppDbContext db)
