@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
@@ -59,9 +60,39 @@ public sealed class AuditIntegrityException(AuditVerification result) : InvalidO
     public AuditVerification Result { get; } = result;
 }
 
+// Keep untrusted timestamps as text until the audit boundary can identify the damaged row.
+public sealed class AuditReadEvent
+{
+    public long Id { get; set; }
+    public string CreatedUtc { get; set; } = "";
+    public string ActorId { get; set; } = "";
+    public string Action { get; set; } = "";
+    public string? FileId { get; set; }
+    public string? TargetId { get; set; }
+    public string Result { get; set; } = "";
+    public long? ChainSequence { get; set; }
+    public byte[]? PreviousMac { get; set; }
+    public byte[]? Mac { get; set; }
+
+    public DateTime? ParseCreatedUtc() =>
+        DateTime.TryParse(CreatedUtc, CultureInfo.InvariantCulture, DateTimeStyles.None, out var value)
+            ? DateTime.SpecifyKind(value, DateTimeKind.Utc) : null;
+
+    public AuditEvent ToEvent(DateTime createdUtc) => new()
+    {
+        Id = Id, CreatedUtc = createdUtc, ActorId = ActorId, Action = Action, FileId = FileId,
+        TargetId = TargetId, Result = Result, ChainSequence = ChainSequence, PreviousMac = PreviousMac, Mac = Mac
+    };
+}
+
 public static class AuditChain
 {
     public const long LimitBytes = 104857600;
+
+    public static IQueryable<AuditReadEvent> ReadEvents(AppDbContext db) =>
+        db.Database.SqlQueryRaw<AuditReadEvent>("""
+            SELECT Id,CreatedUtc,ActorId,Action,FileId,TargetId,Result,ChainSequence,PreviousMac,Mac FROM AuditEvents
+            """);
 
     // BinaryWriter integers are fixed-width little-endian; strings use our explicit UTF-8 length.
     private static void Text(BinaryWriter writer, string? value)
@@ -238,7 +269,15 @@ public static class AuditChain
                     throw Fail("재시작 목록", "삭제 구간 형식 또는 순서가 올바르지 않습니다.");
                 precedingEnd = restart.EndSequence;
             }
-            var rows = db.AuditEvents.AsNoTracking().OrderBy(item => item.ChainSequence).ThenBy(item => item.Id).ToList();
+            var rows = ReadEvents(db).OrderBy(item => item.ChainSequence).ThenBy(item => item.Id)
+                .AsEnumerable().Select(item =>
+                {
+                    var createdUtc = item.ParseCreatedUtc();
+                    if (createdUtc is null)
+                        throw Fail($"Id {item.Id}" + (item.ChainSequence is { } sequence ? $", 순번 {sequence}" : ""),
+                            "CreatedUtc 날짜 형식이 올바르지 않습니다.");
+                    return item.ToEvent(createdUtc.Value);
+                }).ToList();
             foreach (var row in rows.Where(item => item.ChainSequence is null))
             {
                 if (row.Id > state.LegacyMaxId || row.PreviousMac is not null || row.Mac is not null)

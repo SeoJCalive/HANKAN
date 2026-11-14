@@ -39,7 +39,14 @@
             @foreach (var item in Model.Items)
             {
                 <div class="audit-row">
-                    <time data-label="시각" datetime="@item.CreatedUtc.ToString("O")">@item.CreatedUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm:ss")</time>
+                    @if (item.ParseCreatedUtc() is { } createdUtc)
+                    {
+                        <time data-label="시각" datetime="@createdUtc.ToString("O")">@createdUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm:ss")</time>
+                    }
+                    else
+                    {
+                        <span data-label="시각" class="audit-row__text">CreatedUtc 형식 오류: @item.CreatedUtc</span>
+                    }
                     <span data-label="작업자" class="audit-row__text">@Model.Actor(item)</span>
                     <span data-label="사건" class="audit-row__text">@item.Action
                         <small>@(item.Id <= Model.Verification.LegacyMaxId && item.ChainSequence is null && item.PreviousMac is null && item.Mac is null

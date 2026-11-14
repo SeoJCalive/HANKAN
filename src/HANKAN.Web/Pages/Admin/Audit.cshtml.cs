@@ -6,7 +6,7 @@ namespace HANKAN.Web.Pages.Admin;
 
 public sealed class AuditModel(AppDbContext db) : PageModel
 {
-    public List<AuditEvent> Items { get; private set; } = [];
+    public List<AuditReadEvent> Items { get; private set; } = [];
     public Dictionary<string, string> Actors { get; private set; } = [];
     public long? OlderThan { get; private set; }
     public DateTime SnapshotUtc { get; private set; }
@@ -17,7 +17,7 @@ public sealed class AuditModel(AppDbContext db) : PageModel
         await using var transaction = await db.Database.BeginTransactionAsync();
         Verification = db.VerifyAudit();
         SnapshotUtc = Verification.ExecutedUtc;
-        var query = db.AuditEvents.AsNoTracking();
+        var query = AuditChain.ReadEvents(db);
         if (before is > 0) query = query.Where(item => item.Id < before);
         var batch = await query.OrderByDescending(item => item.Id).Take(31).ToListAsync();
         Items = batch.Take(30).ToList();
@@ -28,7 +28,7 @@ public sealed class AuditModel(AppDbContext db) : PageModel
         return Page();
     }
 
-    public string Actor(AuditEvent item) => item.ActorId switch
+    public string Actor(AuditReadEvent item) => item.ActorId switch
     {
         "anonymous" => "익명",
         "anonymous-share" => "익명 공유 이용자",
