@@ -8,9 +8,9 @@ namespace HANKAN.Web;
 
 public sealed record PublicShare(string Name, long SizeBytes, bool PasswordNeeded, string Token);
 public sealed record ShareView(string Id, string Name, string Creator, string Mode, DateTime ExpiresUtc, string Status);
-public sealed record SharedFile(string Id, string Name, long SizeBytes, DateTime ExpiresUtc, bool PasswordNeeded);
+public sealed record SharedFile(string Id, string Name, long SizeBytes, DateTime ExpiresUtc, bool PasswordNeeded, string ShareId);
 
-public sealed class ShareStore(AppDbContext db, SetupStore setup, FileTransferGate gate)
+public sealed class ShareStore(AppDbContext db, SetupStore setup, FileTransferGate gate, PowCaptcha pow)
 {
     public async Task<(string? Token, string? Error)> CreateAsync(ClaimsPrincipal principal, string fileId, string mode,
         DateTime expiresUtc, string? password)
@@ -141,10 +141,10 @@ public sealed class ShareStore(AppDbContext db, SetupStore setup, FileTransferGa
         var share = await FindTokenAsync(token);
         if (share is null || !await IsActiveAsync(share)) return null;
         var file = await db.StoredFiles.AsNoTracking().SingleAsync(item => item.Id == share.FileId);
-        return new SharedFile(file.Id, file.OriginalName, file.SizeBytes, share.ExpiresUtc, share.PasswordHash is not null);
+        return new SharedFile(file.Id, file.OriginalName, file.SizeBytes, share.ExpiresUtc, share.PasswordHash is not null, share.Id);
     }
 
-    public async Task<string> CheckPasswordAsync(string token, string? password)
+    public async Task<string> CheckPasswordAsync(string token, string? password, string? ip, string? challenge, string? solution)
     {
         await using var transaction = await db.Database.BeginTransactionAsync();
         await LockWritesAsync();
@@ -158,6 +158,8 @@ public sealed class ShareStore(AppDbContext db, SetupStore setup, FileTransferGa
             await transaction.CommitAsync();
             return "limited";
         }
+        if (pow.IsRequired("share", share.Id, ip) &&
+            !pow.VerifyAndConsume("share", share.Id, ip, challenge, solution)) return "captcha";
         var suppliedPassword = password ?? "";
         var verification = suppliedPassword is { Length: >= 1 and <= 128 }
             ? PasswordHashing.VerifySharePassword(share.PasswordHash, share.PasswordSalt, suppliedPassword)
@@ -186,6 +188,8 @@ public sealed class ShareStore(AppDbContext db, SetupStore setup, FileTransferGa
         }
         await db.SaveChangesAsync();
         await transaction.CommitAsync();
+        if (matches) pow.Reset("share", share.Id, ip);
+        else pow.RecordFailure("share", share.Id, ip);
         return matches ? "ok" : share.BlockedUntilUtc is null ? "wrong" : "limited";
     }
 

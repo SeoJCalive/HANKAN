@@ -13,11 +13,22 @@
         @Html.AntiForgeryToken()
         @if (Model.Error is not null) { <p class="form-error" role="alert">@Model.Error</p> }
         <label for="email">이메일</label>
-        <input id="email" name="Email" type="email" autocomplete="username" value="@Model.Email" required />
+        <input id="email" name="Email" type="email" autocomplete="username" value="@Model.Email" maxlength="254" required />
         <label for="password">비밀번호</label>
         <input id="password" name="Password" type="password" autocomplete="current-password" required />
+        @if (Model.CaptchaRequired)
+        {
+            <div data-pow-captcha>
+                <input type="hidden" name="Challenge" value="@Model.PowChallenge" />
+                <input type="hidden" name="Solution" value="" />
+                <button type="button" class="button-secondary" data-pow-start aria-describedby="pow-status">추가 확인</button>
+                <p id="pow-status" role="status" aria-live="polite">추가 확인을 누르면 계산 후 폼을 제출합니다.</p>
+                <noscript>추가 확인에는 JavaScript가 필요합니다. 사용을 켜거나 실패 집계 만료 후 다시 시도하세요.</noscript>
+            </div>
+        }
         <button type="submit" class="button-primary">로그인</button>
     </form>
     <p class="footnote">계정이 없나요? <a href="/Register">가입하기</a></p>
     <p class="footnote"><a href="/Public">공개 파일 보기</a></p>
 </section>
+<script src="/js/pow-captcha.js" defer></script>

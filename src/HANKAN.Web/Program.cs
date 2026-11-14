@@ -45,6 +45,8 @@ builder.Services.AddScoped<ShareStore>();
 builder.Services.AddScoped<AuditStore>();
 builder.Services.AddSingleton<IAuditKeyProtector, WindowsAuditKeyProtector>();
 builder.Services.AddSingleton<FileTransferGate>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<PowCaptcha>();
 builder.Services.AddScoped<IAuthorizationHandler, AccessHandler>();
 builder.Services.AddAuthorization(options =>
 {
@@ -181,6 +183,12 @@ app.Use(async (context, next) =>
 {
     context.Response.Headers.XContentTypeOptions = "nosniff";
     context.Response.Headers.XFrameOptions = "DENY";
+    if (string.Equals(context.Request.Path.Value?.TrimEnd('/'), "/Login", StringComparison.OrdinalIgnoreCase) ||
+        context.Request.Path.StartsWithSegments("/Share", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.Headers.ContentSecurityPolicy = "default-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
+        context.Response.Headers.CacheControl = "no-store";
+    }
     if (context.Request.Path.StartsWithSegments("/Share") ||
         context.Request.Path.StartsWithSegments("/Shares") ||
         context.Request.Path.StartsWithSegments("/Public"))
