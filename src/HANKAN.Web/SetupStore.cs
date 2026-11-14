@@ -13,7 +13,7 @@ public enum SetupState { Unconfigured, Ready, RecoveryRequired }
 public sealed class SetupStore
 {
     private const int ApplicationId = 1397966930;
-    private const int SchemaVersion = 7;
+    private const int SchemaVersion = FileKeyEnvelope.SchemaVersion;
     private readonly string contentRoot;
     private readonly string dataDirectory;
     private readonly string databasePath;
@@ -55,14 +55,23 @@ public sealed class SetupStore
                     if (completed == 0) return adminCount == 0 ? SetupState.Unconfigured : SetupState.RecoveryRequired;
                     if (completed != 1 || adminCount != 1) return SetupState.RecoveryRequired;
                     using var command = connection.CreateCommand();
-                    command.CommandText = "SELECT FolderPath, DpapiProbe FROM AppState WHERE Id = 1;";
+                    command.CommandText = "SELECT FolderPath, DpapiProbe, ProtectedKek FROM AppState WHERE Id = 1;";
                     using var reader = command.ExecuteReader();
                     if (!reader.Read() || reader.IsDBNull(0) || reader.IsDBNull(1)) return SetupState.RecoveryRequired;
                     if (!Directory.Exists(reader.GetString(0))) return SetupState.RecoveryRequired;
                     if (!OperatingSystem.IsWindows()) return SetupState.RecoveryRequired;
                     var plain = ProtectedData.Unprotect((byte[])reader[1], null, DataProtectionScope.CurrentUser);
-                    var validProbe = plain.Length == 32;
-                    CryptographicOperations.ZeroMemory(plain);
+                    bool validProbe;
+                    try { validProbe = plain.Length == 32; }
+                    finally { CryptographicOperations.ZeroMemory(plain); }
+                    if (!validProbe || reader[2] is not byte[] protectedKek || protectedKek.Length == 0)
+                        return SetupState.RecoveryRequired;
+                    var kek = ProtectedData.Unprotect(protectedKek, null, DataProtectionScope.CurrentUser);
+                    try
+                    {
+                        if (kek.Length != 32) return SetupState.RecoveryRequired;
+                    }
+                    finally { CryptographicOperations.ZeroMemory(kek); }
                     reader.Close();
                     if (!validProbe) return SetupState.RecoveryRequired;
                     var protectedKey = AuditChain.ReadProtectedKey(connection);
@@ -113,9 +122,16 @@ public sealed class SetupStore
                 File.Delete(probeFile);
 
                 if (!OperatingSystem.IsWindows()) return "Windows에서만 최초 설정할 수 있습니다.";
-                var probe = ProtectedData.Protect(RandomNumberGenerator.GetBytes(32), null, DataProtectionScope.CurrentUser);
-                if (ProtectedData.Unprotect(probe, null, DataProtectionScope.CurrentUser).Length != 32)
-                    return "Windows 키 보호 기능을 확인할 수 없습니다.";
+                var plainProbe = RandomNumberGenerator.GetBytes(32);
+                byte[] probe;
+                try { probe = ProtectedData.Protect(plainProbe, null, DataProtectionScope.CurrentUser); }
+                finally { CryptographicOperations.ZeroMemory(plainProbe); }
+                var restoredProbe = ProtectedData.Unprotect(probe, null, DataProtectionScope.CurrentUser);
+                try
+                {
+                    if (restoredProbe.Length != 32) return "Windows 키 보호 기능을 확인할 수 없습니다.";
+                }
+                finally { CryptographicOperations.ZeroMemory(restoredProbe); }
                 using var scope = scopes.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var users = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
@@ -131,6 +147,9 @@ public sealed class SetupStore
                 configuration.FolderPath = folder;
                 configuration.QuotaBytes = (long)quotaGiB * 1024 * 1024 * 1024;
                 configuration.DpapiProbe = probe;
+                var kek = RandomNumberGenerator.GetBytes(32);
+                try { configuration.ProtectedKek = ProtectedData.Protect(kek, null, DataProtectionScope.CurrentUser); }
+                finally { CryptographicOperations.ZeroMemory(kek); }
                 configuration.Completed = true;
                 db.SaveChanges();
                 AuditChain.Initialize((SqliteConnection)db.Database.GetDbConnection(),
@@ -198,6 +217,14 @@ public sealed class SetupStore
                     AuditChain.UpgradeV6(connection, transaction, auditKeys);
                     transaction.Commit();
                 }
+                if (ScalarLong(connection, "PRAGMA user_version;") is 7 or SchemaVersion)
+                    FileKeyEnvelope.Upgrade(connection,
+                        bytes => OperatingSystem.IsWindows()
+                            ? ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser)
+                            : throw new PlatformNotSupportedException(),
+                        bytes => OperatingSystem.IsWindows()
+                            ? ProtectedData.Unprotect(bytes, null, DataProtectionScope.CurrentUser)
+                            : throw new PlatformNotSupportedException());
                 return;
             }
             var known = ScalarLong(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';");
@@ -210,7 +237,7 @@ public sealed class SetupStore
             db.SaveChanges();
             using var initialized = Open();
             using var command = initialized.CreateCommand();
-            command.CommandText = "PRAGMA application_id = 1397966930; PRAGMA user_version = 7;";
+            command.CommandText = $"PRAGMA application_id = 1397966930; PRAGMA user_version = {SchemaVersion};";
             command.ExecuteNonQuery();
             File.WriteAllText(markerPath, "HANKAN instance\n");
         }

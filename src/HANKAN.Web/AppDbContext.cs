@@ -21,6 +21,7 @@ public sealed class StorageConfiguration
     public string? FolderPath { get; set; }
     public long? QuotaBytes { get; set; }
     public byte[]? DpapiProbe { get; set; }
+    public byte[]? ProtectedKek { get; set; }
 }
 
 public sealed class StoredFile
@@ -37,7 +38,7 @@ public sealed class StoredFile
     public byte[]? ProtectedKey { get; set; }
     public byte[]? Nonce { get; set; }
     public byte[]? Tag { get; set; }
-    public int FormatVersion { get; set; } = 1;
+    public int FormatVersion { get; set; } = 2;
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 }
 
