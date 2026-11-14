@@ -70,7 +70,9 @@ builder.Services.AddIdentity<AppUser, IdentityRole>(options =>
         options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(1);
     })
     .AddEntityFrameworkStores<AppDbContext>();
+// Existing Identity PBKDF2 hashes only; new passwords use Argon2id.
 builder.Services.Configure<PasswordHasherOptions>(options => options.IterationCount = 210_000);
+builder.Services.AddScoped<IPasswordHasher<AppUser>, Argon2idPasswordHasher>();
 builder.Services.ConfigureApplicationCookie(options =>
 {
     options.LoginPath = "/Login";
