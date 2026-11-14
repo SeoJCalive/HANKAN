@@ -5,9 +5,12 @@ using Microsoft.Net.Http.Headers;
 
 namespace HANKAN.Web.Pages;
 
-public sealed class ShareModel(ShareStore shares, FileStore files, FileTransferGate gate, AuditStore audit) : PageModel
+public sealed class ShareModel(ShareStore shares, FileStore files, FileTransferGate gate, AuditStore audit, PowCaptcha pow) : PageModel
 {
     [BindProperty] public string? Password { get; set; }
+    [BindProperty(Name = "Challenge")] public string? PowChallenge { get; set; }
+    [BindProperty] public string? Solution { get; set; }
+    public bool CaptchaRequired { get; private set; }
     public SharedFile? Item { get; private set; }
     public string? Error { get; private set; }
 
@@ -15,6 +18,7 @@ public sealed class ShareModel(ShareStore shares, FileStore files, FileTransferG
     {
         Item = await shares.FindActiveAsync(token);
         if (Item is null) Response.StatusCode = StatusCodes.Status404NotFound;
+        PrepareCaptcha();
         return Page();
     }
 
@@ -24,7 +28,8 @@ public sealed class ShareModel(ShareStore shares, FileStore files, FileTransferG
         byte[]? plain = null;
         try
         {
-            var result = await shares.CheckPasswordAsync(token, Password);
+            var result = await shares.CheckPasswordAsync(token, Password,
+                HttpContext.Connection.RemoteIpAddress?.ToString(), PowChallenge, Solution);
             if (result != "ok")
             {
                 if (result == "unavailable")
@@ -33,9 +38,15 @@ public sealed class ShareModel(ShareStore shares, FileStore files, FileTransferG
                     Response.StatusCode = StatusCodes.Status404NotFound;
                     return Page();
                 }
-                Error = result == "limited" ? "시도 제한에 걸렸습니다. 15분 뒤 다시 시도하세요." : "비밀번호가 올바르지 않습니다.";
+                Error = result switch
+                {
+                    "limited" => "시도 제한에 걸렸습니다. 15분 뒤 다시 시도하세요.",
+                    "captcha" => "추가 확인을 완료한 뒤 다시 시도하세요. 만료되거나 사용한 확인은 다시 풀어야 합니다.",
+                    _ => "비밀번호가 올바르지 않습니다."
+                };
                 Item = await shares.FindActiveAsync(token);
                 if (Item is null) Response.StatusCode = StatusCodes.Status404NotFound;
+                PrepareCaptcha();
                 return Page();
             }
             Item = await shares.FindActiveAsync(token);
@@ -78,5 +89,13 @@ public sealed class ShareModel(ShareStore shares, FileStore files, FileTransferG
             if (plain is not null) CryptographicOperations.ZeroMemory(plain);
             gate.Transfer.Release();
         }
+    }
+
+    private void PrepareCaptcha()
+    {
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        CaptchaRequired = Item is { PasswordNeeded: true } && pow.IsRequired("share", Item.ShareId, ip);
+        PowChallenge = CaptchaRequired ? pow.Issue("share", Item!.ShareId, ip) : null;
+        Solution = null;
     }
 }
