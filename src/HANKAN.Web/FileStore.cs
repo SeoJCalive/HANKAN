@@ -185,6 +185,7 @@ public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGat
 
     public async Task<string?> UploadAsync(Stream body, string rawName, string actorId, string actorEmail, string? folderId, CancellationToken cancellation)
     {
+        if (setup.State != SetupState.Ready) return "저장소 복구 상태를 확인하세요.";
         if (!OperatingSystem.IsWindows()) return "Windows에서만 파일을 저장할 수 있습니다.";
         var name = SafeName(rawName);
         if (name is null) return "올바른 파일 이름을 선택하세요.";
@@ -222,8 +223,12 @@ public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGat
         var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
         byte[]? plain = null;
         byte[]? key = null;
+        byte[]? kek = null;
         try
         {
+            if (config.ProtectedKek is not { Length: > 0 }) return "저장소 키를 확인할 수 없습니다.";
+            kek = ProtectedData.Unprotect(config.ProtectedKek, null, DataProtectionScope.CurrentUser);
+            if (kek.Length != 32) return "저장소 키를 확인할 수 없습니다.";
             using var memory = new MemoryStream();
             while (true)
             {
@@ -240,7 +245,7 @@ public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGat
             var cipher = new byte[plain.Length];
             using (var aes = new AesGcm(key, tag.Length))
                 aes.Encrypt(nonce, plain, cipher, tag);
-            var protectedKey = ProtectedData.Protect(key, null, DataProtectionScope.CurrentUser);
+            var protectedKey = FileKeyEnvelope.Wrap(kek, file.Id, key);
             await using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 await output.WriteAsync(cipher, cancellation);
             file.SizeBytes = plain.LongLength;
@@ -254,10 +259,15 @@ public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGat
             committed = true;
             return null;
         }
+        catch (CryptographicException)
+        {
+            return "저장소 키를 확인할 수 없습니다.";
+        }
         finally
         {
             if (plain is not null) CryptographicOperations.ZeroMemory(plain);
             if (key is not null) CryptographicOperations.ZeroMemory(key);
+            if (kek is not null) CryptographicOperations.ZeroMemory(kek);
             CryptographicOperations.ZeroMemory(buffer);
             ArrayPool<byte>.Shared.Return(buffer);
             if (!committed)
@@ -281,12 +291,15 @@ public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGat
 
     public async Task<byte[]?> DecryptAsync(StoredFile file, CancellationToken cancellation)
     {
+        if (setup.State != SetupState.Ready) return null;
         if (!OperatingSystem.IsWindows()) return null;
-        if (file.SizeBytes is < 0 or > MaxFileBytes || file.FormatVersion != 1 || file.ProtectedKey is null || file.Nonce?.Length != 12 ||
+        if (file.SizeBytes is < 0 or > MaxFileBytes || file.FormatVersion != 2 || file.ProtectedKey is null || file.Nonce?.Length != 12 ||
             file.Tag?.Length != 16 || !Guid.TryParseExact(file.StorageName, "N", out _)) return null;
-        var folder = (await db.Configurations.AsNoTracking().SingleAsync(cancellation)).FolderPath;
-        if (folder is null) return null;
+        var config = await db.Configurations.AsNoTracking().SingleAsync(cancellation);
+        var folder = config.FolderPath;
+        if (folder is null || config.ProtectedKek is not { Length: > 0 }) return null;
         byte[]? key = null;
+        byte[]? kek = null;
         byte[]? plain = null;
         var verified = false;
         try
@@ -295,8 +308,8 @@ public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGat
             if (input.Length != file.SizeBytes) return null;
             var cipher = new byte[(int)file.SizeBytes];
             await input.ReadExactlyAsync(cipher, cancellation);
-            key = ProtectedData.Unprotect(file.ProtectedKey, null, DataProtectionScope.CurrentUser);
-            if (key.Length != 32) return null;
+            kek = ProtectedData.Unprotect(config.ProtectedKek, null, DataProtectionScope.CurrentUser);
+            key = FileKeyEnvelope.Unwrap(kek, file.Id, file.ProtectedKey);
             plain = new byte[cipher.Length];
             using (var aes = new AesGcm(key, file.Tag.Length))
                 aes.Decrypt(file.Nonce, cipher, file.Tag, plain);
@@ -310,6 +323,7 @@ public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGat
         finally
         {
             if (key is not null) CryptographicOperations.ZeroMemory(key);
+            if (kek is not null) CryptographicOperations.ZeroMemory(kek);
             if (!verified && plain is not null) CryptographicOperations.ZeroMemory(plain);
         }
     }
