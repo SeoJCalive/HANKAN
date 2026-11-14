@@ -64,10 +64,11 @@ public sealed class SetupStore
                     var validProbe = plain.Length == 32;
                     CryptographicOperations.ZeroMemory(plain);
                     reader.Close();
-                    using var chainCommand = connection.CreateCommand();
-                    chainCommand.CommandText = "SELECT ProtectedHmacKey FROM AuditChainState WHERE Id = 1";
-                    if (!validProbe || chainCommand.ExecuteScalar() is not byte[] protectedKey)
-                        return SetupState.RecoveryRequired;
+                    if (!validProbe) return SetupState.RecoveryRequired;
+                    byte[]? protectedKey;
+                    try { protectedKey = AuditChain.ReadProtectedKey(connection); }
+                    catch (AuditIntegrityException) { return SetupState.Ready; }
+                    if (protectedKey is null) return SetupState.RecoveryRequired;
                     var key = AuditChain.RestoreKey(protectedKey, auditKeys);
                     CryptographicOperations.ZeroMemory(key);
                     return SetupState.Ready;

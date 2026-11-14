@@ -17,9 +17,9 @@ public sealed class AuditModel(AppDbContext db) : PageModel
         await using var transaction = await db.Database.BeginTransactionAsync();
         Verification = db.VerifyAudit();
         SnapshotUtc = Verification.ExecutedUtc;
-        var query = AuditChain.ReadEvents(db);
+        var query = AuditChain.ReadEvents(db).AsEnumerable();
         if (before is > 0) query = query.Where(item => item.Id < before);
-        var batch = await query.OrderByDescending(item => item.Id).Take(31).ToListAsync();
+        var batch = query.OrderByDescending(item => item.Id).Take(31).ToList();
         Items = batch.Take(30).ToList();
         if (batch.Count > 30) OlderThan = Items[^1].Id;
         var ids = Items.Select(item => item.ActorId).Distinct().ToList();

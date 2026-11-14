@@ -38,6 +38,10 @@
             <div class="audit-row audit-row--heading" aria-hidden="true"><span>시각</span><span>작업자</span><span>사건</span><span>대상 ID</span><span>결과</span></div>
             @foreach (var item in Model.Items)
             {
+                @if (item.Failure is { } failure)
+                {
+                    <p class="path-value">@failure.Location @failure.Reason</p>
+                }
                 <div class="audit-row">
                     @if (item.ParseCreatedUtc() is { } createdUtc)
                     {
@@ -49,7 +53,7 @@
                     }
                     <span data-label="작업자" class="audit-row__text">@Model.Actor(item)</span>
                     <span data-label="사건" class="audit-row__text">@item.Action
-                        <small>@(item.Id <= Model.Verification.LegacyMaxId && item.ChainSequence is null && item.PreviousMac is null && item.Mac is null
+                        <small>@(item.Failure is null && item.Id <= Model.Verification.LegacyMaxId && item.ChainSequence is null && item.PreviousMac is null && item.Mac is null
                             ? "배포 전: 검증 범위 밖" : $"체인 순번 {item.ChainSequence?.ToString() ?? "없음"}")</small>
                     </span>
                     <span data-label="대상" class="audit-row__text">@(item.TargetId ?? item.FileId ?? "—")</span>

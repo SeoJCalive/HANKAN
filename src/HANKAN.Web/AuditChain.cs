@@ -60,7 +60,7 @@ public sealed class AuditIntegrityException(AuditVerification result) : InvalidO
     public AuditVerification Result { get; } = result;
 }
 
-// Keep untrusted timestamps as text until the audit boundary can identify the damaged row.
+// A damaged row remains displayable, but never enters the authenticated model.
 public sealed class AuditReadEvent
 {
     public long Id { get; set; }
@@ -73,6 +73,7 @@ public sealed class AuditReadEvent
     public long? ChainSequence { get; set; }
     public byte[]? PreviousMac { get; set; }
     public byte[]? Mac { get; set; }
+    public AuditVerification? Failure { get; set; }
 
     public DateTime? ParseCreatedUtc() =>
         DateTime.TryParse(CreatedUtc, CultureInfo.InvariantCulture, DateTimeStyles.None, out var value)
@@ -89,10 +90,142 @@ public static class AuditChain
 {
     public const long LimitBytes = 104857600;
 
-    public static IQueryable<AuditReadEvent> ReadEvents(AppDbContext db) =>
-        db.Database.SqlQueryRaw<AuditReadEvent>("""
-            SELECT Id,CreatedUtc,ActorId,Action,FileId,TargetId,Result,ChainSequence,PreviousMac,Mac FROM AuditEvents
-            """);
+    private sealed class RawRow(string table, Dictionary<string, object> values)
+    {
+        public string Location => table + " / " + (table switch
+        {
+            "AuditEvents" => values["Id"] is long id ? $"Id {id}" : $"rowid {values["__rowid"]}",
+            "AuditChainState" => values["Id"] is long stateId ? $"Id {stateId}" : $"rowid {values["__rowid"]}",
+            _ => $"rowid {values["__rowid"]}"
+        }) + (table == "AuditEvents" && values.GetValueOrDefault("ChainSequence") is long sequence
+            ? $", 순번 {sequence}" : "");
+
+        public AuditIntegrityException Fail(string field, string reason) => new(new(
+            DateTime.UtcNow, null, 0, null, null, 0, 0, false, Location, $"{field} {reason}", []));
+
+        public T Value<T>(string field)
+        {
+            if (values[field] is T value) return value;
+            throw Fail(field, "저장 형식이 올바르지 않습니다.");
+        }
+
+        public T? NullableValue<T>(string field) where T : struct =>
+            values[field] is DBNull ? null : Value<T>(field);
+
+        public string? NullableText(string field) =>
+            values[field] is DBNull ? null : Value<string>(field);
+
+        public byte[]? Mac(string field, bool nullable = false)
+        {
+            if (nullable && values[field] is DBNull) return null;
+            var value = Value<byte[]>(field);
+            if (value.Length != 32) throw Fail(field, "MAC 길이가 올바르지 않습니다.");
+            return value;
+        }
+
+        public DateTime Utc(string field)
+        {
+            var text = Value<string>(field);
+            if (!DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var value))
+                throw Fail(field, "날짜 형식이 올바르지 않습니다.");
+            return DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        }
+
+        public long Integer(string field, long minimum = 0, long maximum = long.MaxValue)
+        {
+            var value = Value<long>(field);
+            if (value < minimum || value > maximum) throw Fail(field, "정수 범위가 올바르지 않습니다.");
+            return value;
+        }
+    }
+
+    // GetValue preserves SQLite storage classes. Typed provider getters can coerce or throw
+    // before we can attribute corruption; database/reader failures deliberately propagate.
+    private static List<RawRow> ReadRows(SqliteConnection connection, SqliteTransaction? transaction,
+        string table, string columns = "*", string order = "rowid")
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"SELECT rowid AS __rowid,{columns} FROM {table} ORDER BY {order}";
+        using var reader = command.ExecuteReader();
+        var rows = new List<RawRow>();
+        while (reader.Read())
+        {
+            var values = new Dictionary<string, object>();
+            for (var i = 0; i < reader.FieldCount; i++) values.Add(reader.GetName(i), reader.GetValue(i));
+            rows.Add(new RawRow(table, values));
+        }
+        return rows;
+    }
+
+    private static List<RawRow> ReadRows(AppDbContext db, string table,
+        string columns = "*", string order = "rowid")
+    {
+        db.Database.OpenConnection();
+        try
+        {
+            return ReadRows((SqliteConnection)db.Database.GetDbConnection(),
+                (SqliteTransaction?)db.Database.CurrentTransaction?.GetDbTransaction(), table, columns, order);
+        }
+        finally { db.Database.CloseConnection(); }
+    }
+
+    private static AuditChainState ReadState(RawRow row)
+    {
+        var state = new AuditChainState
+        {
+            Id = (int)row.Integer("Id", 1, int.MaxValue),
+            FormatVersion = row.Integer("FormatVersion", 1, 1),
+            ChainId = row.Value<string>("ChainId"),
+            StartedUtc = row.Utc("StartedUtc"),
+            LegacyMaxId = row.Integer("LegacyMaxId"),
+            ProtectedHmacKey = row.Value<byte[]>("ProtectedHmacKey"),
+            LastSequence = row.Integer("LastSequence"),
+            LastMac = row.Mac("LastMac")!,
+            StateMac = row.Mac("StateMac")!
+        };
+        if (state.Id != 1) throw row.Fail("Id", "상태 행 식별자가 올바르지 않습니다.");
+        if (!Guid.TryParseExact(state.ChainId, "N", out _))
+            throw row.Fail("ChainId", "GUID 형식이 올바르지 않습니다.");
+        if (state.ProtectedHmacKey.Length == 0) throw row.Fail("ProtectedHmacKey", "보호 키가 없습니다.");
+        return state;
+    }
+
+    // Setup keeps genuine DPAPI recovery failures distinct from malformed audit metadata.
+    public static byte[]? ReadProtectedKey(SqliteConnection connection)
+    {
+        var rows = ReadRows(connection, null, "AuditChainState");
+        return rows.Count == 1 ? ReadState(rows[0]).ProtectedHmacKey : null;
+    }
+
+    public static List<AuditReadEvent> ReadEvents(AppDbContext db)
+    {
+        var events = new List<AuditReadEvent>();
+        foreach (var row in ReadRows(db, "AuditEvents"))
+        {
+            var item = new AuditReadEvent();
+            try
+            {
+                item.Id = row.Integer("Id", 1);
+                item.ChainSequence = row.NullableValue<long>("ChainSequence");
+                if (item.ChainSequence is < 1) throw row.Fail("ChainSequence", "정수 범위가 올바르지 않습니다.");
+                item.CreatedUtc = row.Value<string>("CreatedUtc");
+                item.ActorId = row.Value<string>("ActorId");
+                item.Action = row.Value<string>("Action");
+                item.FileId = row.NullableText("FileId");
+                item.TargetId = row.NullableText("TargetId");
+                item.Result = row.Value<string>("Result");
+                if (item.Result is not ("success" or "denied" or "failure"))
+                    throw row.Fail("Result", "사건 결과가 올바르지 않습니다.");
+                item.PreviousMac = row.Mac("PreviousMac", true);
+                item.Mac = row.Mac("Mac", true);
+                row.Utc("CreatedUtc");
+            }
+            catch (AuditIntegrityException exception) { item.Failure = exception.Result; }
+            events.Add(item);
+        }
+        return events;
+    }
 
     // BinaryWriter integers are fixed-width little-endian; strings use our explicit UTF-8 length.
     private static void Text(BinaryWriter writer, string? value)
@@ -176,11 +309,11 @@ public static class AuditChain
         command.CommandText = "SELECT count(*) FROM AuditChainState";
         if (Convert.ToInt64(command.ExecuteScalar()) != 0)
             throw new InvalidOperationException("Audit chain is already initialized.");
-        command.CommandText = "SELECT coalesce(max(Id),0) FROM AuditEvents";
         var state = new AuditChainState
         {
             ChainId = Guid.NewGuid().ToString("N"), StartedUtc = DateTime.UtcNow,
-            LegacyMaxId = Convert.ToInt64(command.ExecuteScalar())
+            LegacyMaxId = ReadRows(connection, transaction, "AuditEvents", "Id")
+                .Select(row => row.Integer("Id", 1)).DefaultIfEmpty(0).Max()
         };
         var key = RandomNumberGenerator.GetBytes(32);
         try
@@ -235,15 +368,15 @@ public static class AuditChain
         public required AuditChainState State { get; init; }
         public required List<AuditChainRestart> Restarts { get; init; }
         public required byte[] Key { get; init; }
+        public required List<AuditEvent> Rows { get; init; }
         public void Dispose() => CryptographicOperations.ZeroMemory(Key);
     }
 
     // No tracking: an outer transaction may have committed a newer tail since this context was created.
     public static Snapshot ReadVerified(AppDbContext db, IAuditKeyProtector protector)
     {
-        var states = db.Set<AuditChainState>().AsNoTracking().ToList();
-        var restarts = db.Set<AuditChainRestart>().AsNoTracking().OrderBy(item => item.StartSequence).ToList();
-        var state = states.SingleOrDefault(item => item.Id == 1);
+        AuditChainState? state = null;
+        var restarts = new List<AuditChainRestart>();
         byte[] key = [];
         var now = DateTime.UtcNow;
         long verified = 0, legacy = 0;
@@ -252,7 +385,24 @@ public static class AuditChain
             state?.LegacyMaxId ?? 0, first, last, verified, legacy, false, location, reason, restarts));
         try
         {
-            if (states.Count != 1 || state is null) throw Fail("상태", "체인 상태가 없거나 단일 행이 아닙니다.");
+            var states = ReadRows(db, "AuditChainState").Select(ReadState).ToList();
+            if (states.Count != 1) throw Fail("상태", "체인 상태가 없거나 단일 행이 아닙니다.");
+            state = states[0];
+            foreach (var row in ReadRows(db, "AuditChainRestarts"))
+            {
+                var restart = new AuditChainRestart
+                {
+                    StartSequence = row.Integer("StartSequence", 1),
+                    EndSequence = row.Integer("EndSequence", 1),
+                    EndMac = row.Mac("EndMac")!,
+                    RecordedUtc = row.Utc("RecordedUtc"),
+                    Reason = row.Value<string>("Reason")
+                };
+                if (restart.Reason is not ("period" or "size" or "period+size"))
+                    throw row.Fail("Reason", "삭제 이유가 올바르지 않습니다.");
+                restarts.Add(restart);
+            }
+            restarts.Sort((left, right) => left.StartSequence.CompareTo(right.StartSequence));
             try { key = RestoreKey(state.ProtectedHmacKey, protector); }
             catch (Exception exception) when (exception is CryptographicException or PlatformNotSupportedException)
             { throw Fail("키", "보호 키를 복원할 수 없습니다. 같은 Windows 실행 계정과 백업을 확인하세요."); }
@@ -270,13 +420,10 @@ public static class AuditChain
                 precedingEnd = restart.EndSequence;
             }
             var rows = ReadEvents(db).OrderBy(item => item.ChainSequence).ThenBy(item => item.Id)
-                .AsEnumerable().Select(item =>
+                .Select(item =>
                 {
-                    var createdUtc = item.ParseCreatedUtc();
-                    if (createdUtc is null)
-                        throw Fail($"Id {item.Id}" + (item.ChainSequence is { } sequence ? $", 순번 {sequence}" : ""),
-                            "CreatedUtc 날짜 형식이 올바르지 않습니다.");
-                    return item.ToEvent(createdUtc.Value);
+                    if (item.Failure is not null) throw Fail(item.Failure.Location, item.Failure.Reason);
+                    return item.ToEvent(item.ParseCreatedUtc()!.Value);
                 }).ToList();
             foreach (var row in rows.Where(item => item.ChainSequence is null))
             {
@@ -314,7 +461,7 @@ public static class AuditChain
             }
             if (index != restarts.Count || sequence != state.LastSequence || !Same(previous, state.LastMac))
                 throw Fail($"기대 순번 {sequence + 1} / 끝 상태", "보존 체인과 인증된 끝 또는 삭제 구간이 일치하지 않습니다.");
-            return new Snapshot { State = state, Restarts = restarts, Key = key };
+            return new Snapshot { State = state, Restarts = restarts, Key = key, Rows = rows };
         }
         catch { CryptographicOperations.ZeroMemory(key); throw; }
     }
@@ -326,10 +473,10 @@ public static class AuditChain
         try
         {
             using var snapshot = ReadVerified(db, protector);
-            var rows = db.AuditEvents.AsNoTracking().Where(item => item.ChainSequence != null);
+            var rows = snapshot.Rows.Where(item => item.ChainSequence != null).ToList();
             return new(DateTime.UtcNow, snapshot.State.StartedUtc, snapshot.State.LegacyMaxId,
-                rows.Min(item => item.ChainSequence), rows.Max(item => item.ChainSequence), rows.LongCount(),
-                db.AuditEvents.LongCount(item => item.ChainSequence == null), true, "", "", snapshot.Restarts);
+                rows.Min(item => item.ChainSequence), rows.Max(item => item.ChainSequence), rows.Count,
+                snapshot.Rows.LongCount(item => item.ChainSequence == null), true, "", "", snapshot.Restarts);
         }
         catch (AuditIntegrityException exception) { return exception.Result; }
     }
@@ -371,12 +518,11 @@ public static class AuditChain
     {
         using var snapshot = ReadVerified(db, protector);
         var cutoff = now.AddDays(-30);
-        var expired = db.AuditEvents.AsNoTracking().Where(item => item.CreatedUtc < cutoff).ToList();
+        var expired = snapshot.Rows.Where(item => item.CreatedUtc < cutoff).ToList();
         var reasons = expired.ToDictionary(item => item.Id, _ => "period");
         // Keep the original seven-field SQL byte expression, including exact UTC O formatting.
-        var sizes = db.Database.SqlQueryRaw<AuditSize>($"""
-            SELECT Id, CreatedUtc, {AppDbContext.AuditBytesSql} AS Bytes FROM AuditEvents ORDER BY CreatedUtc, Id
-            """).ToList();
+        var sizes = ReadRows(db, "AuditEvents", $"Id, {AppDbContext.AuditBytesSql} AS Bytes", "CreatedUtc, Id")
+            .Select(row => (Id: row.Integer("Id", 1), Bytes: row.Integer("Bytes"))).ToList();
         var remaining = sizes.Where(item => !reasons.ContainsKey(item.Id)).Sum(item => item.Bytes);
         foreach (var size in sizes.Where(item => !reasons.ContainsKey(item.Id)))
         {
@@ -384,7 +530,7 @@ public static class AuditChain
             reasons.Add(size.Id, "size");
             remaining -= size.Bytes;
         }
-        var selected = reasons.Count == 0 ? [] : db.AuditEvents.AsNoTracking().ToList()
+        var selected = reasons.Count == 0 ? [] : snapshot.Rows
             .Where(item => reasons.ContainsKey(item.Id)).ToList();
         var intervals = snapshot.Restarts.Concat(selected.Where(item => item.ChainSequence is not null)
             .Select(item => new AuditChainRestart
@@ -425,12 +571,5 @@ public static class AuditChain
             WriteState(db, snapshot);
         }
         return new(expired.Count, reasons.Count - expired.Count, sizes.Count - reasons.Count, remaining);
-    }
-
-    private sealed class AuditSize
-    {
-        public long Id { get; set; }
-        public DateTime CreatedUtc { get; set; }
-        public long Bytes { get; set; }
     }
 }
