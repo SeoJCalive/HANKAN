@@ -22,6 +22,84 @@
 
 기존 설치를 새 버전으로 실행하면 데이터베이스가 v5에서 v6으로 자동 변경된다. 이번 Argon2id 전환은 기존 해시 필드를 사용하므로 별도 스키마 변경이 없다. 업데이트 전 앱을 종료하고 실제 사용 중인 데이터 폴더(기본 `%LOCALAPPDATA%\HANKAN`, 지정 시 `HANKAN_DATA_DIR`) 전체(`hankan.db`·`instance.marker`·존재하는 SQLite 부속 파일 포함)와 설정에서 지정한 암호문 저장 폴더를 **같은 시점에 함께 백업**한다. 구버전은 새 Argon2id 해시를 읽지 못하므로 복구할 때는 앱을 종료한 뒤 **코드와 DB·데이터·암호문 저장 폴더를 배포 전의 같은 시점으로 함께 복원**한다. 실패 상태의 SQLite 부속 파일은 복원한 DB와 섞이지 않게 분리한다.
 
+## BILAB 로그온 시 서버와 Quick Tunnel 시작
+
+운영 PC에서 BILAB으로 대화형 로그인한 상태로 등록·실행한다. 예약 작업은 해당 계정의 `Interactive` 로그온과 사용자 로그온 트리거를 사용한다. 기존 파일의 CurrentUser DPAPI 키를 사용하므로 같은 Windows 계정을 유지한다. Windows 서비스나 암호 저장은 사용하지 않으며, 로그온 전에는 실행되지 않는다.
+
+등록 전 PowerShell에서 저장소를 빌드하고 cloudflared 설치 및 전용 빈 설정을 준비한다. 이미 있는 전용 빈 설정은 재사용하며 사용자 `.cloudflared` 설정은 수정하지 않는다.
+
+```powershell
+Set-Location C:\Users\BILAB\LinuxWorkspace\HANKAN
+dotnet build .\src\HANKAN.Web\HANKAN.Web.csproj
+winget install --id Cloudflare.cloudflared --exact
+$TunnelHome = Join-Path $env:LOCALAPPDATA 'HANKAN-Tunnel'
+New-Item -ItemType Directory -Path $TunnelHome -Force | Out-Null
+if (-not (Test-Path "$TunnelHome\cloudflared-empty.yml")) {
+    Set-Content "$TunnelHome\cloudflared-empty.yml" '{}' -Encoding ASCII
+}
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\register-hankan-task.ps1
+```
+
+`HANKAN-AutoStart`는 **비활성 상태로 등록**된다. 일회 확인 전 기존 수동 서버·터널의 PID를 확인하고 각각의 실행 콘솔에서 중지하여 5180·5196을 비운다. 시작 스크립트는 어느 포트든 점유돼 있으면 기존 listener를 종료하거나 재사용하지 않고 오류로 끝낸다.
+
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort 5180,5196 -ErrorAction SilentlyContinue
+Enable-ScheduledTask -TaskName 'HANKAN-AutoStart'
+Start-ScheduledTask -TaskName 'HANKAN-AutoStart'
+Get-ScheduledTask -TaskName 'HANKAN-AutoStart' | Format-List Principal,Triggers,State
+Get-ScheduledTaskInfo -TaskName 'HANKAN-AutoStart'
+Get-Content D:\HANKAN\data\autostart.log -Tail 10
+```
+
+`autostart.log`에 `ready`가 기록된 뒤 다음 명령으로 서버와 이번 URL을 확인한다. 시작 스크립트는 서버 준비 후 같은 PC에서 HTTP/2 Quick Tunnel을 실행하며 metrics는 `127.0.0.1:5196`을 사용한다. 서버 로그는 `D:\HANKAN\server.log`, 터널 로그는 `D:\HANKAN\data\tunnel.log`다. 실패는 `autostart.log`와 작업 결과에 남고 실행 시작 시 이전 URL을 지운다.
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5180/Login
+$Url = (Get-Content D:\HANKAN\tunnel-url.txt -Raw).Trim()
+Invoke-WebRequest -UseBasicParsing ($Url + '/Login')
+Disable-ScheduledTask -TaskName 'HANKAN-AutoStart'
+Get-ScheduledTask -TaskName 'HANKAN-AutoStart' | Select-Object TaskName,State
+```
+
+등록·일회 확인 후에는 위와 같이 비활성화해 둔다. 비활성화는 다음 로그온 실행을 막으며 **현재 실행 중인 서버·터널은 계속 실행된다**. 이후 자동 시작을 선택할 때 활성화 한 줄은 `Enable-ScheduledTask -TaskName 'HANKAN-AutoStart'`다. 즉시 실행하려면 활성화 후 `Start-ScheduledTask`도 실행한다.
+
+URL 파일에는 이번 실행의 `https://...trycloudflare.com` 임시 주소가 들어간다. 터널 재시작 때 주소가 바뀌므로 새 주소에서 공유 URL을 다시 복사한다. 주소 발급과 외부 HTTPS 도달은 별도로 확인한다. URL은 해당 실행이 살아 있는 동안만 유효하며, 강제 종료를 포함해 실행이 끝나면 URL 파일을 삭제한다.
+
+두 스크립트는 같은 매개변수를 받으며 등록 스크립트는 모두 시작 스크립트에 전달한다.
+
+| 매개변수 | 기본값 |
+| --- | --- |
+| `-RepoPath` | `C:\Users\BILAB\LinuxWorkspace\HANKAN` |
+| `-DataDir` | `D:\HANKAN\data` |
+| `-Port` | `5180` (`HANKAN_PORT` 환경값 대신 지정값 사용) |
+| `-MetricsPort` | `5196` |
+| `-UrlFile` | `D:\HANKAN\tunnel-url.txt` |
+| `-TaskName` | `HANKAN-AutoStart` |
+
+별도 데이터 폴더를 지정하면 서버 로그도 그 폴더의 `server.log`에 쓴다. 시험 시에는 여섯 값을 모두 운영용과 분리한다. 시작 스크립트를 직접 실행할 때도 전용 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-hankan-tunnel.ps1 ...` 프로세스를 사용한다.
+
+실행 중지와 수동 운영 복귀는 아래 순서로 한다. `Stop-ScheduledTask`는 이 실행이 시작한 서버·터널을 Windows Job Object로 함께 정리한다. 수동 실행한 기존 프로세스에는 적용하지 않는다. 재등록이 필요하면 중지 후 `Unregister-ScheduledTask -TaskName 'HANKAN-AutoStart' -Confirm:$false`로 해제하고 등록한다.
+
+```powershell
+Disable-ScheduledTask -TaskName 'HANKAN-AutoStart'
+Stop-ScheduledTask -TaskName 'HANKAN-AutoStart'
+Get-NetTCPConnection -State Listen -LocalPort 5180,5196 -ErrorAction SilentlyContinue
+cmd /c 'set HANKAN_DATA_DIR=D:\HANKAN\data&& set HANKAN_PORT=5180&& cd /d C:\Users\BILAB\LinuxWorkspace\HANKAN && dotnet run --no-build --project src\HANKAN.Web\HANKAN.Web.csproj > D:\HANKAN\server.log 2>&1'
+```
+
+수동 서버 응답을 확인한 뒤 별도 `powershell.exe -NoProfile` 콘솔에서 기존 Quick Tunnel을 수동 실행한다. 이 콘솔은 사용하는 동안 유지하고 종료할 때 Ctrl+C를 누른다.
+
+```powershell
+$TunnelHome = Join-Path $env:LOCALAPPDATA 'HANKAN-Tunnel'
+Set-Location $TunnelHome
+Get-ChildItem Env: |
+    Where-Object { $_.Name -like 'TUNNEL_*' -or $_.Name -in @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY') } |
+    ForEach-Object { Remove-Item ('Env:' + $_.Name) }
+& 'C:\Program Files (x86)\cloudflared\cloudflared.exe' tunnel `
+    --config "$TunnelHome\cloudflared-empty.yml" --url http://127.0.0.1:5180 `
+    --protocol http2 --no-autoupdate --metrics 127.0.0.1:5196
+```
+
 2026-10-04 당시 격리 시험에서 28개 시나리오 중 21개가 통과했고 7개는 일부 조건만 확인했다. 이후 개별 시험에서 잘못된 전송 길이·디스크 부족·삭제 중 사용량 정산, 격리 인스턴스의 별도 휴대폰 전송과 요청 제한 회귀를 확인했다. 현재 남은 일은 완성본 전체 통합 시험과 운영 실계정·휴대폰 확인이다. DB와 표식 동시 소실의 기록·판정, 작업 종료 후 앱 저장 폴더와 앱 임시 경로에 평문 파일이 남지 않음, 모든 역할·상태의 작은 화면·키보드 조작 등은 통합 시험에서 함께 확인한다.
 
 이 저장소는 수업 시연용 버전이며, 후속 단계에서 상시 운영을 위한 배포·백업 운영·보안 점검 체계를 확장한다.
