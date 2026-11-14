@@ -43,6 +43,7 @@ builder.Services.AddScoped<BulkMoveStore>();
 builder.Services.AddScoped<BulkDeleteStore>();
 builder.Services.AddScoped<ShareStore>();
 builder.Services.AddScoped<AuditStore>();
+builder.Services.AddSingleton<IAuditKeyProtector, WindowsAuditKeyProtector>();
 builder.Services.AddSingleton<FileTransferGate>();
 builder.Services.AddScoped<IAuthorizationHandler, AccessHandler>();
 builder.Services.AddAuthorization(options =>
@@ -151,8 +152,15 @@ var setup = app.Services.GetRequiredService<SetupStore>();
 if (setup.State == SetupState.Ready)
 {
     using var scope = app.Services.CreateScope();
-    await scope.ServiceProvider.GetRequiredService<AppDbContext>().PruneAuditAsync();
-    await scope.ServiceProvider.GetRequiredService<FileStore>().RecoverAsync();
+    try
+    {
+        await scope.ServiceProvider.GetRequiredService<AppDbContext>().PruneAuditAsync();
+        await scope.ServiceProvider.GetRequiredService<FileStore>().RecoverAsync();
+    }
+    catch (AuditIntegrityException exception)
+    {
+        app.Logger.LogError(exception, "Audit integrity failed at startup; retention and file recovery are suspended. Read-only administrator verification remains available.");
+    }
 }
 if (setup.State == SetupState.Unconfigured)
     Console.WriteLine($"한칸(HANKAN) 최초 설정 코드: {setup.SetupCode}");

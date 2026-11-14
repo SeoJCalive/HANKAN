@@ -58,6 +58,9 @@ public sealed class AuditEvent
     public string? FileId { get; set; }
     public string? TargetId { get; set; }
     public string Result { get; set; } = "success";
+    public long? ChainSequence { get; set; }
+    public byte[]? PreviousMac { get; set; }
+    public byte[]? Mac { get; set; }
 }
 
 public sealed class ShareGrant
@@ -81,7 +84,8 @@ public sealed class ShareGrant
     public DateTime? BlockedUntilUtc { get; set; }
 }
 
-public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbContext> logger) : IdentityDbContext<AppUser>(options)
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbContext> logger,
+    IAuditKeyProtector auditKeys) : IdentityDbContext<AppUser>(options)
 {
     public DbSet<StorageConfiguration> Configurations => Set<StorageConfiguration>();
     public DbSet<StoredFile> StoredFiles => Set<StoredFile>();
@@ -89,8 +93,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<ShareGrant> Shares => Set<ShareGrant>();
 
-    private const long AuditLimitBytes = 104857600L;
-    private const string AuditBytesSql = """
+    internal const string AuditBytesSql = """
         CASE WHEN "CreatedUtc" IS NULL THEN 0 ELSE
           length(CAST(
             substr("CreatedUtc",1,10) || 'T' || substr("CreatedUtc",12,8) || '.' ||
@@ -104,31 +107,20 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger
         + coalesce(length(CAST("TargetId" AS BLOB)),0)
         + coalesce(length(CAST("Result" AS BLOB)),0)
         """;
-    private const string AuditTotalsSql = $"""
-        SELECT count(*) AS "Rows", coalesce(sum({AuditBytesSql}),0) AS "LogicalBytes" FROM "AuditEvents"
-        """;
-    private const string AuditSizeDeleteSql = $"""
-        WITH sizes AS MATERIALIZED (
-          SELECT "Id", "CreatedUtc", {AuditBytesSql} AS bytes FROM "AuditEvents"
-        ), ordered AS (
-          SELECT "Id", bytes,
-            sum(bytes) OVER (
-              ORDER BY "CreatedUtc" ASC, "Id" ASC
-              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-            ) AS running
-          FROM sizes
-        )
-        DELETE FROM "AuditEvents"
-        WHERE "Id" IN (
-          SELECT "Id" FROM ordered WHERE running - bytes < $excess
-        )
-        """;
-    private const string AuditPeriodDeleteSql = """DELETE FROM "AuditEvents" WHERE "CreatedUtc" < $cutoff""";
+    public AuditVerification VerifyAudit() => AuditChain.Verify(this, auditKeys);
 
-    private sealed class AuditTotals
+    private List<AuditEvent> AddedAuditEvents()
     {
-        public long Rows { get; set; }
-        public long LogicalBytes { get; set; }
+        ChangeTracker.DetectChanges();
+        if (ChangeTracker.Entries<AuditEvent>().Any(entry => entry.State is EntityState.Modified or EntityState.Deleted) ||
+            ChangeTracker.Entries<AuditChainState>().Any(entry => entry.State != EntityState.Unchanged) ||
+            ChangeTracker.Entries<AuditChainRestart>().Any(entry => entry.State != EntityState.Unchanged))
+            throw new InvalidOperationException("Audit history and chain metadata are read-only.");
+        var added = ChangeTracker.Entries<AuditEvent>().Where(entry => entry.State == EntityState.Added)
+            .Select(entry => entry.Entity).ToList();
+        if (added.Any(item => item.ChainSequence is not null || item.PreviousMac is not null || item.Mac is not null))
+            throw new InvalidOperationException("Audit signatures are assigned by the database save path.");
+        return added;
     }
 
     public override int SaveChanges() => SaveChanges(true);
@@ -138,8 +130,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
-        ChangeTracker.DetectChanges();
-        if (!ChangeTracker.Entries<AuditEvent>().Any(entry => entry.State == EntityState.Added))
+        var added = AddedAuditEvents();
+        if (added.Count == 0)
             return base.SaveChanges(acceptAllChangesOnSuccess);
 
         IDbContextTransaction? owned = null;
@@ -154,23 +146,18 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger
                 transaction.CreateSavepoint("audit_retention");
                 savepoint = true;
             }
+            Database.ExecuteSqlRaw("""UPDATE "AppState" SET "Id" = "Id" WHERE "Id" = 1""");
+            using var chain = AuditChain.ReadVerified(this, auditKeys);
             var saved = base.SaveChanges(false);
             baseCompleted = true;
+            AuditChain.Append(this, chain, added);
             var now = DateTime.UtcNow;
             var cutoff = now.AddDays(-30);
-            var expiredDeleted = Database.ExecuteSqlRaw(AuditPeriodDeleteSql, new SqliteParameter("$cutoff", cutoff));
-            var totals = Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).Single();
-            var sizeDeleted = 0;
-            if (totals.LogicalBytes > AuditLimitBytes)
-            {
-                sizeDeleted = Database.ExecuteSqlRaw(AuditSizeDeleteSql,
-                    new SqliteParameter("$excess", totals.LogicalBytes - AuditLimitBytes));
-                totals = Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).Single();
-            }
+            var retention = AuditChain.Prune(this, auditKeys, now);
             if (owned is not null) owned.Commit();
             else transaction.ReleaseSavepoint("audit_retention");
             if (acceptAllChangesOnSuccess) ChangeTracker.AcceptAllChanges();
-            LogAuditRetention("save", now, cutoff, expiredDeleted, sizeDeleted, totals,
+            LogAuditRetention("save", now, cutoff, retention,
                 owned is not null ? "committed" : "enlisted");
             return saved;
         }
@@ -197,8 +184,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger
 
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
-        ChangeTracker.DetectChanges();
-        if (!ChangeTracker.Entries<AuditEvent>().Any(entry => entry.State == EntityState.Added))
+        var added = AddedAuditEvents();
+        if (added.Count == 0)
             return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
 
         IDbContextTransaction? owned = null;
@@ -213,24 +200,20 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger
                 await transaction.CreateSavepointAsync("audit_retention", cancellationToken);
                 savepoint = true;
             }
+            await Database.ExecuteSqlRawAsync("""UPDATE "AppState" SET "Id" = "Id" WHERE "Id" = 1""", cancellationToken);
+            using var chain = AuditChain.ReadVerified(this, auditKeys);
+            cancellationToken.ThrowIfCancellationRequested();
             var saved = await base.SaveChangesAsync(false, cancellationToken);
             baseCompleted = true;
+            AuditChain.Append(this, chain, added);
             var now = DateTime.UtcNow;
             var cutoff = now.AddDays(-30);
-            var expiredDeleted = await Database.ExecuteSqlRawAsync(AuditPeriodDeleteSql,
-                [new SqliteParameter("$cutoff", cutoff)], cancellationToken);
-            var totals = await Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).SingleAsync(cancellationToken);
-            var sizeDeleted = 0;
-            if (totals.LogicalBytes > AuditLimitBytes)
-            {
-                sizeDeleted = await Database.ExecuteSqlRawAsync(AuditSizeDeleteSql,
-                    [new SqliteParameter("$excess", totals.LogicalBytes - AuditLimitBytes)], cancellationToken);
-                totals = await Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).SingleAsync(cancellationToken);
-            }
+            var retention = AuditChain.Prune(this, auditKeys, now);
+            cancellationToken.ThrowIfCancellationRequested();
             if (owned is not null) await owned.CommitAsync(cancellationToken);
             else await transaction.ReleaseSavepointAsync("audit_retention", cancellationToken);
             if (acceptAllChangesOnSuccess) ChangeTracker.AcceptAllChanges();
-            LogAuditRetention("save", now, cutoff, expiredDeleted, sizeDeleted, totals,
+            LogAuditRetention("save", now, cutoff, retention,
                 owned is not null ? "committed" : "enlisted");
             return saved;
         }
@@ -267,18 +250,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger
             await Database.ExecuteSqlRawAsync("""UPDATE "AppState" SET "Id" = "Id" WHERE "Id" = 1""");
             var now = DateTime.UtcNow;
             var cutoff = now.AddDays(-30);
-            var expiredDeleted = await Database.ExecuteSqlRawAsync(AuditPeriodDeleteSql,
-                new SqliteParameter("$cutoff", cutoff));
-            var totals = await Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).SingleAsync();
-            var sizeDeleted = 0;
-            if (totals.LogicalBytes > AuditLimitBytes)
-            {
-                sizeDeleted = await Database.ExecuteSqlRawAsync(AuditSizeDeleteSql,
-                    new SqliteParameter("$excess", totals.LogicalBytes - AuditLimitBytes));
-                totals = await Database.SqlQueryRaw<AuditTotals>(AuditTotalsSql).SingleAsync();
-            }
+            var retention = AuditChain.Prune(this, auditKeys, now);
             await transaction.CommitAsync();
-            LogAuditRetention("startup", now, cutoff, expiredDeleted, sizeDeleted, totals, "committed");
+            LogAuditRetention("startup", now, cutoff, retention, "committed");
         }
         catch (Exception exception)
         {
@@ -299,14 +273,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger
         }
     }
 
-    private void LogAuditRetention(string trigger, DateTime now, DateTime cutoff, long expiredDeleted,
-        long sizeDeleted, AuditTotals totals, string transactionState)
+    private void LogAuditRetention(string trigger, DateTime now, DateTime cutoff,
+        AuditChain.Retention retention, string transactionState)
     {
         var dbFileBytes = new FileInfo(((SqliteConnection)Database.GetDbConnection()).DataSource).Length;
         logger.LogInformation(
             "Audit retention trigger={Trigger} utc={Utc} cutoff={Cutoff} expiredDeleted={ExpiredDeleted} sizeDeleted={SizeDeleted} rows={Rows} logicalBytes={LogicalBytes} dbFileBytes={DbFileBytes} transaction={TransactionState}",
             trigger, now.ToString("O", CultureInfo.InvariantCulture), cutoff.ToString("O", CultureInfo.InvariantCulture),
-            expiredDeleted, sizeDeleted, totals.Rows, totals.LogicalBytes, dbFileBytes, transactionState);
+            retention.ExpiredDeleted, retention.SizeDeleted, retention.Rows, retention.LogicalBytes, dbFileBytes, transactionState);
     }
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -325,6 +299,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ILogger
         builder.Entity<StoredFolder>().HasIndex(folder => new { folder.ParentId, folder.Name }).IsUnique()
             .HasDatabaseName("IX_Folders_Parent_Name").HasFilter("\"ParentId\" IS NOT NULL");
         builder.Entity<AuditEvent>().HasIndex(item => new { item.CreatedUtc, item.Id });
+        builder.Entity<AuditEvent>().HasIndex(item => item.ChainSequence).IsUnique();
+        builder.Entity<AuditChainState>().ToTable("AuditChainState").HasKey(item => item.Id);
+        builder.Entity<AuditChainState>().Property(item => item.Id).ValueGeneratedNever();
+        builder.Entity<AuditChainRestart>().ToTable("AuditChainRestarts").HasKey(item => item.StartSequence);
+        builder.Entity<AuditChainRestart>().Property(item => item.StartSequence).ValueGeneratedNever();
         builder.Entity<AuditEvent>().Property(item => item.CreatedUtc)
             .HasConversion(value => value, value => DateTime.SpecifyKind(value, DateTimeKind.Utc));
         builder.Entity<ShareGrant>().HasIndex(share => share.TokenHash).IsUnique();
