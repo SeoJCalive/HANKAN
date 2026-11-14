@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace HANKAN.Web;
@@ -48,11 +50,7 @@ public sealed class ShareStore(AppDbContext db, SetupStore setup, FileTransferGa
             using (var aes = new AesGcm(tokenKey, grant.TokenTag.Length))
                 aes.Encrypt(grant.TokenNonce, tokenBytes, grant.TokenCipher, grant.TokenTag);
             if (!string.IsNullOrEmpty(password))
-            {
-                grant.PasswordSalt = RandomNumberGenerator.GetBytes(16);
-                grant.PasswordHash = Rfc2898DeriveBytes.Pbkdf2(password, grant.PasswordSalt, 210_000,
-                    HashAlgorithmName.SHA256, 32);
-            }
+                grant.PasswordHash = Encoding.UTF8.GetBytes(PasswordHashing.HashPassword(password));
             db.Shares.Add(grant);
             db.AuditEvents.Add(new AuditEvent { ActorId = actorId, Action = "share.create." + mode, FileId = fileId, TargetId = grant.Id });
             await db.SaveChangesAsync();
@@ -160,13 +158,18 @@ public sealed class ShareStore(AppDbContext db, SetupStore setup, FileTransferGa
             await transaction.CommitAsync();
             return "limited";
         }
-        var supplied = password is { Length: >= 1 and <= 128 } && share.PasswordSalt is not null
-            ? Rfc2898DeriveBytes.Pbkdf2(password, share.PasswordSalt, 210_000, HashAlgorithmName.SHA256, 32)
-            : new byte[32];
-        var matches = CryptographicOperations.FixedTimeEquals(supplied, share.PasswordHash);
-        CryptographicOperations.ZeroMemory(supplied);
+        var suppliedPassword = password ?? "";
+        var verification = suppliedPassword is { Length: >= 1 and <= 128 }
+            ? PasswordHashing.VerifySharePassword(share.PasswordHash, share.PasswordSalt, suppliedPassword)
+            : PasswordVerificationResult.Failed;
+        var matches = verification != PasswordVerificationResult.Failed;
         if (matches)
         {
+            if (verification == PasswordVerificationResult.SuccessRehashNeeded)
+            {
+                share.PasswordHash = Encoding.UTF8.GetBytes(PasswordHashing.HashPassword(suppliedPassword));
+                share.PasswordSalt = null;
+            }
             share.FailedAttempts = 0;
             share.BlockedUntilUtc = null;
         }
