@@ -9,6 +9,26 @@
     <h1 id="page-title">감사 기록</h1>
     <p class="lead">보호 작업의 결과를 최신 기록부터 확인합니다.</p>
 </section>
+<section class="status-section path-value" aria-labelledby="chain-title">
+    <div class="section-heading"><h2 id="chain-title">보존 체인 검증</h2><a href="/Admin/Audit">다시 검증</a></div>
+    <p>조회·검증 스냅샷 UTC: @Model.SnapshotUtc.ToString("O")</p>
+    <p>체인 시작 UTC: @(Model.Verification.StartedUtc?.ToString("O") ?? "상태 없음")</p>
+    <p>검증 순번: @(Model.Verification.FirstSequence?.ToString() ?? "없음") ~ @(Model.Verification.LastSequence?.ToString() ?? "없음"),
+        검증 @Model.Verification.VerifiedCount 건, 배포 전 제외 @Model.Verification.LegacyCount 건</p>
+    <p role="status"><strong>@(Model.Verification.Ok ? "OK" : "실패")</strong>
+        @Model.Verification.Location @Model.Verification.Reason</p>
+    <p>인증된 정상 삭제 재시작점</p>
+    @if (Model.Verification.Restarts.Count == 0) { <p>없음</p> }
+    @foreach (var restart in Model.Verification.Restarts)
+    {
+        <p>삭제 순번 @restart.StartSequence ~ @restart.EndSequence / 재시작 순번 @(restart.EndSequence + 1) /
+            @restart.Reason / UTC @restart.RecordedUtc.ToString("O")</p>
+    }
+    <p class="footnote">배포 이후 현재 보존된 사건과 인증된 삭제 경계를 검증합니다. 배포 전 기록과 정상 삭제된 본문의 진실성은 검증하지 않습니다.
+        서버 실행 계정으로 DPAPI 키 복원과 DB 쓰기가 모두 가능한 접근자는 체인을 다시 계산할 수 있습니다.
+        키·상태·삭제 구간을 포함한 DB 전체를 과거의 일관된 스냅샷으로 되돌리는 공격은 외부 체크포인트 없이 탐지하지 못합니다.
+        검증은 읽기 전용이며 체인을 재생성하거나 수동 재시작하지 않습니다.</p>
+</section>
 <section class="status-section" aria-labelledby="audit-title">
     <div class="section-heading"><h2 id="audit-title">최근 사건</h2><span>페이지당 최대 30건</span></div>
     @if (Model.Items.Count == 0) { <p class="empty-state">표시할 감사 기록이 없습니다.</p> }
@@ -18,10 +38,24 @@
             <div class="audit-row audit-row--heading" aria-hidden="true"><span>시각</span><span>작업자</span><span>사건</span><span>대상 ID</span><span>결과</span></div>
             @foreach (var item in Model.Items)
             {
+                @if (item.Failure is { } failure)
+                {
+                    <p class="path-value">@failure.Location @failure.Reason</p>
+                }
                 <div class="audit-row">
-                    <time data-label="시각" datetime="@item.CreatedUtc.ToString("O")">@item.CreatedUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm:ss")</time>
+                    @if (item.ParseCreatedUtc() is { } createdUtc)
+                    {
+                        <time data-label="시각" datetime="@createdUtc.ToString("O")">@createdUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm:ss")</time>
+                    }
+                    else
+                    {
+                        <span data-label="시각" class="audit-row__text">CreatedUtc 형식 오류: @item.CreatedUtc</span>
+                    }
                     <span data-label="작업자" class="audit-row__text">@Model.Actor(item)</span>
-                    <span data-label="사건" class="audit-row__text">@item.Action</span>
+                    <span data-label="사건" class="audit-row__text">@item.Action
+                        <small>@(item.Failure is null && item.Id <= Model.Verification.LegacyMaxId && item.ChainSequence is null && item.PreviousMac is null && item.Mac is null
+                            ? "배포 전: 검증 범위 밖" : $"체인 순번 {item.ChainSequence?.ToString() ?? "없음"}")</small>
+                    </span>
                     <span data-label="대상" class="audit-row__text">@(item.TargetId ?? item.FileId ?? "—")</span>
                     <strong data-label="결과">@(item.Result switch { "success" => "성공", "denied" => "거부", _ => "실패" })</strong>
                 </div>

@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace HANKAN.Web;
 
@@ -12,7 +13,7 @@ public enum SetupState { Unconfigured, Ready, RecoveryRequired }
 public sealed class SetupStore
 {
     private const int ApplicationId = 1397966930;
-    private const int SchemaVersion = 6;
+    private const int SchemaVersion = 7;
     private readonly string contentRoot;
     private readonly string dataDirectory;
     private readonly string databasePath;
@@ -20,13 +21,15 @@ public sealed class SetupStore
     private readonly object gate = new();
     private readonly SemaphoreSlim setupGate = new(1, 1);
     private readonly IServiceScopeFactory scopes;
+    private readonly IAuditKeyProtector auditKeys;
     private readonly byte[] setupCodeBytes = RandomNumberGenerator.GetBytes(24);
 
     public string SetupCode => Convert.ToHexString(setupCodeBytes);
 
-    public SetupStore(IServiceScopeFactory scopes, IWebHostEnvironment environment)
+    public SetupStore(IServiceScopeFactory scopes, IWebHostEnvironment environment, IAuditKeyProtector auditKeys)
     {
         this.scopes = scopes;
+        this.auditKeys = auditKeys;
         contentRoot = Path.GetFullPath(environment.ContentRootPath);
         dataDirectory = Path.GetFullPath(Environment.GetEnvironmentVariable("HANKAN_DATA_DIR")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HANKAN"));
@@ -58,7 +61,15 @@ public sealed class SetupStore
                     if (!Directory.Exists(reader.GetString(0))) return SetupState.RecoveryRequired;
                     if (!OperatingSystem.IsWindows()) return SetupState.RecoveryRequired;
                     var plain = ProtectedData.Unprotect((byte[])reader[1], null, DataProtectionScope.CurrentUser);
-                    return plain.Length == 32 ? SetupState.Ready : SetupState.RecoveryRequired;
+                    var validProbe = plain.Length == 32;
+                    CryptographicOperations.ZeroMemory(plain);
+                    reader.Close();
+                    if (!validProbe) return SetupState.RecoveryRequired;
+                    var protectedKey = AuditChain.ReadProtectedKey(connection);
+                    if (protectedKey is null) return SetupState.RecoveryRequired;
+                    var key = AuditChain.RestoreKey(protectedKey, auditKeys);
+                    CryptographicOperations.ZeroMemory(key);
+                    return SetupState.Ready;
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SqliteException or CryptographicException or PlatformNotSupportedException)
                 {
@@ -122,6 +133,8 @@ public sealed class SetupStore
                 configuration.DpapiProbe = probe;
                 configuration.Completed = true;
                 db.SaveChanges();
+                AuditChain.Initialize((SqliteConnection)db.Database.GetDbConnection(),
+                    (SqliteTransaction)transaction.GetDbTransaction(), auditKeys);
                 transaction.Commit();
                 CryptographicOperations.ZeroMemory(setupCodeBytes);
                 return null;
@@ -179,6 +192,12 @@ public sealed class SetupStore
                     UpgradeV4(connection);
                 if (ScalarLong(connection, "PRAGMA user_version;") == 5)
                     UpgradeV5(connection);
+                if (ScalarLong(connection, "PRAGMA user_version;") == 6)
+                {
+                    using var transaction = connection.BeginTransaction();
+                    AuditChain.UpgradeV6(connection, transaction, auditKeys);
+                    transaction.Commit();
+                }
                 return;
             }
             var known = ScalarLong(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';");
@@ -191,11 +210,12 @@ public sealed class SetupStore
             db.SaveChanges();
             using var initialized = Open();
             using var command = initialized.CreateCommand();
-            command.CommandText = "PRAGMA application_id = 1397966930; PRAGMA user_version = 6;";
+            command.CommandText = "PRAGMA application_id = 1397966930; PRAGMA user_version = 7;";
             command.ExecuteNonQuery();
             File.WriteAllText(markerPath, "HANKAN instance\n");
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SqliteException or DbUpdateException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SqliteException or DbUpdateException
+            or CryptographicException or PlatformNotSupportedException)
         {
         }
     }
