@@ -16,7 +16,7 @@
     <dl class="status-list">
         <div class="status-row"><dt>관리자</dt><dd>@Model.Email</dd></div>
         <div class="status-row"><dt>저장 폴더</dt><dd class="path-value">@Model.Folder</dd></div>
-        <div class="status-row"><dt>전체 용량 한도</dt><dd>@Model.QuotaGiB GiB</dd></div>
+        <div class="status-row"><dt>전체 용량 한도</dt><dd>@await Html.PartialAsync("_ByteSize", (Model.QuotaBytes, "전체 용량 한도"))</dd></div>
         <div class="status-row"><dt>계정 관리</dt><dd><a href="/Admin/Users">사용자와 권한 관리</a></dd></div>
         <div class="status-row"><dt>공유 관리</dt><dd><a href="/Shares">전체 공유</a></dd></div>
         <div class="status-row"><dt>감사 기록</dt><dd><a href="/Admin/Audit">최근 보호 작업 보기</a></dd></div>

@@ -19,7 +19,7 @@
         {
             <div class="file-row">
                 <div class="file-row__name">@item.Name</div>
-                <div class="file-row__meta">@item.SizeBytes.ToString("N0") B · @(item.PasswordNeeded ? "비밀번호 필요" : "비밀번호 없음")</div>
+                <div class="file-row__meta">@await Html.PartialAsync("_ByteSize", (item.SizeBytes, "파일 크기")) · @(item.PasswordNeeded ? "비밀번호 필요" : "비밀번호 없음")</div>
                 <a class="button-secondary file-row__download" href="/Share/@item.Token" rel="noreferrer">열기</a>
             </div>
         }

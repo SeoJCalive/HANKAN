@@ -63,12 +63,20 @@
             {
                 <p class="storage-role">보기 권한 · 폴더 탐색과 다운로드 가능</p>
             }
-            <p class="storage-quota">사용 @Model.UsedBytes.ToString("N0") B / 전체 @Model.QuotaBytes.ToString("N0") B</p>
+            <div class="storage-usage">
+                <p class="storage-quota">사용 @await Html.PartialAsync("_ByteSize", (Model.UsedBytes, "사용 용량")) / 전체 @await Html.PartialAsync("_ByteSize", (Model.QuotaBytes, "전체 용량"))</p>
+                @if (Model.QuotaBytes > 0 && Model.UsedBytes >= 0)
+                {
+                    <meter min="0" max="@Model.QuotaBytes" value="@Math.Min(Model.UsedBytes, Model.QuotaBytes)" aria-label="공용 저장소 사용량"
+                           aria-valuetext="사용 @HANKAN.Web.ByteSizeFormatter.Format(Model.UsedBytes).Exact / 전체 @HANKAN.Web.ByteSizeFormatter.Format(Model.QuotaBytes).Exact"></meter>
+                }
+                else { <span>사용률 확인 불가</span> }
+            </div>
             @if (Model.Current?.State == "owner")
             {
                 var remaining = Model.QuotaBytes - Model.UsedBytes;
                 <div class="info-anchor">
-                    <p class="storage-quota">남은 논리적 용량 @((remaining / 1073741824d).ToString("N2")) GiB (@remaining.ToString("N0") B)</p>
+                    <p class="storage-quota"><span>남은 논리적 용량 @await Html.PartialAsync("_ByteSize", (remaining, "남은 논리적 용량"))</span></p>
                     @await Html.PartialAsync("_InfoTip", ("남은 논리적 용량", "전체 공용 저장소 기준 · 업로드 예약과 삭제 처리 중인 파일 포함 · 실제 디스크 여유나 업로드 성공을 보장하지 않습니다.", (string?)null))
                 </div>
             }
@@ -178,7 +186,7 @@
                         <label class="storage-row__select"><input type="checkbox" aria-label="@file.OriginalName 선택" /></label>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2h9l5 5v15H5zM14 2v6h5M8 13h8M8 17h6" /></svg><span>@file.OriginalName<small class="storage-row__uploader">업로더 · @file.UploaderEmail</small></span>
                     </div>
-                    <span class="storage-row__size" data-label="크기">@file.SizeBytes.ToString("N0") B</span>
+                    <span class="storage-row__size" data-label="크기">@await Html.PartialAsync("_ByteSize", (file.SizeBytes, "파일 크기"))</span>
                     <time class="storage-row__date" datetime="@file.CreatedUtc.ToString("O")">@file.CreatedUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm")</time>
                     <div class="storage-row__action">
                         @if (canManage)
@@ -247,6 +255,7 @@
     </div>
 </div>
 
+<script src="/js/byte-size.js"></script>
 <script>
     (() => {
         const list = document.getElementById("storage-list");
@@ -341,7 +350,10 @@
 
         if (deleteButton) {
             const verificationToken = toolbar.querySelector('input[name="__RequestVerificationToken"]').value;
+            let previewVersion = 0;
             async function previewDelete() {
+                const version = ++previewVersion;
+                showDeleteSize();
                 deleteButton.disabled = true;
                 deleteConfirm.checked = false;
                 deleteSubmit.disabled = true;
@@ -355,19 +367,21 @@
                         body: selectionData()
                     });
                     const result = response.headers.get("Content-Type")?.includes("application/json") ? await response.json() : null;
+                    if (version !== previewVersion || !deleteDialog.open) return;
                     if (!response.ok) throw new Error(result?.message || "삭제 영향을 확인하지 못했습니다.");
                     deleteToken = result.previewToken;
                     document.getElementById("delete-folder-count").textContent = `${result.folderCount.toLocaleString()}개`;
                     document.getElementById("delete-file-count").textContent = `${result.fileCount.toLocaleString()}개`;
-                    document.getElementById("delete-size").textContent = `${result.totalBytes.toLocaleString()} B`;
+                    showDeleteSize(result.totalBytes);
                     document.getElementById("delete-share-count").textContent = `${result.shareCount.toLocaleString()}개`;
                     deleteStatus.textContent = "영향을 확인한 뒤 영구 삭제를 선택하세요.";
                     deleteSubmit.disabled = !deleteConfirm.checked;
                 } catch (error) {
+                    if (version !== previewVersion) return;
                     deleteStatus.textContent = error instanceof Error ? error.message : "삭제 영향을 확인하지 못했습니다.";
                     deleteRefresh.hidden = false;
                 } finally {
-                    deleteButton.disabled = false;
+                    if (version === previewVersion) deleteButton.disabled = false;
                 }
             }
             deleteButton.addEventListener("click", () => {
@@ -376,6 +390,9 @@
                 void previewDelete();
             });
             deleteDialog.addEventListener("close", () => {
+                previewVersion++;
+                deleteButton.disabled = false;
+                showDeleteSize();
                 deleteToken = null;
                 deleteConfirm.checked = false;
                 deleteSubmit.disabled = true;
@@ -402,6 +419,7 @@
                     });
                     const result = response.headers.get("Content-Type")?.includes("application/json") ? await response.json() : null;
                     if (response.status === 409) {
+                        showDeleteSize();
                         deleteToken = null;
                         deleteConfirm.checked = false;
                         deleteRefresh.hidden = false;
@@ -419,6 +437,7 @@
                     sessionStorage.setItem("hankan-delete-result", message);
                     location.reload();
                 } catch (error) {
+                    showDeleteSize();
                     deleteStatus.textContent = error instanceof Error ? error.message : "영구 삭제를 완료하지 못했습니다.";
                     deleteRefresh.hidden = false;
                     deleteToken = null;
@@ -500,7 +519,7 @@
         });
         list.addEventListener("click", event => {
             if (ignoreClick) { ignoreClick = false; return; }
-            if (event.target.closest(".storage-row__action")) return;
+            if (event.target.closest(".storage-row__action, .byte-size, .byte-exact")) return;
             const row = event.target.closest("[data-selection-id]");
             if (!row) return;
             if (event.target.closest(".storage-row__select")) {
@@ -511,12 +530,12 @@
             selectRow(row, event);
         });
         list.addEventListener("dblclick", event => {
-            if (event.target.closest(".storage-row__action, .storage-row__select")) return;
+            if (event.target.closest(".storage-row__action, .storage-row__select, .byte-size, .byte-exact")) return;
             const row = event.target.closest("[data-selection-id]");
             if (row) location.assign(row.dataset.openUrl);
         });
         list.addEventListener("keydown", event => {
-            if (event.target.closest(".storage-row__action")) return;
+            if (event.target.closest(".storage-row__action, .byte-size, .byte-exact")) return;
             const row = event.target.closest("[data-selection-id]");
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
                 event.preventDefault();
@@ -783,7 +802,7 @@
         }
         list.addEventListener("dragstart", event => {
             const row = event.target.closest(".storage-row[data-selection-id]");
-            if (!row || event.target.closest(".storage-row__select, .storage-row__action")) {
+            if (!row || event.target.closest(".storage-row__select, .storage-row__action, .byte-size, .byte-exact")) {
                 event.preventDefault();
                 return;
             }

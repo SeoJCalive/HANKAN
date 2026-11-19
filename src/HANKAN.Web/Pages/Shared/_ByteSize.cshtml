@@ -1,0 +1,13 @@
+@model (long Bytes, string Label)
+@{
+    var (shortValue, exact) = HANKAN.Web.ByteSizeFormatter.Format(Model.Bytes);
+}
+@if (exact is null)
+{
+    @shortValue
+}
+else
+{
+    var id = $"bytes-{Guid.NewGuid():N}";
+    <button type="button" class="byte-size" title="@exact" aria-label="@Model.Label: @exact" popovertarget="@id" draggable="true">@shortValue</button><span class="byte-exact" id="@id" popover="auto">@exact</span>
+}

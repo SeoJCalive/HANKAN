@@ -155,6 +155,19 @@ h1 { margin: 0; font-size: var(--type-display); font-weight: 900; letter-spacing
 .storage-toolbar__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .storage-toolbar .button-primary, .storage-toolbar .button-secondary { margin: 0; }
 .storage-quota, .storage-role { margin: 0; }
+.storage-usage { display: grid; gap: var(--space-2); }
+.storage-usage meter { width: 100%; height: var(--space-2); }
+@media (forced-colors: none) {
+    .storage-usage meter { appearance: none; border: 1px solid var(--line); background: var(--surface-muted); }
+    .storage-usage meter::-webkit-meter-bar { height: 100%; border: 0; border-radius: 0; background: var(--surface-muted); }
+    .storage-usage meter::-webkit-meter-optimum-value { background: var(--ink); }
+    .storage-usage meter::-moz-meter-bar { background: var(--ink); }
+}
+.byte-size { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; white-space: nowrap; text-decoration: underline dotted; text-underline-offset: .15em; cursor: pointer; }
+.byte-exact { max-width: calc(100% - 2 * var(--space-4)); padding: var(--space-2) var(--space-4); border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: var(--type-small); overflow-wrap: anywhere; }
+@supports (position-area: block-end) {
+    .byte-exact { position-area: block-end; position-try-fallbacks: flip-block; inset: auto; margin: 0; justify-self: anchor-center; max-width: calc(100vw - 2 * var(--space-4)); }
+}
 .storage-role { color: var(--ink-muted); }
 .storage-notice { padding: var(--space-4); border: 1px solid var(--line-strong); }
 .storage-selection { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-4); margin-bottom: var(--space-4); padding: var(--space-4); border: 1px solid var(--line-strong); background: var(--surface-muted); }
