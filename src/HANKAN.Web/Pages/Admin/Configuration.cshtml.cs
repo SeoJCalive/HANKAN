@@ -7,7 +7,7 @@ public sealed class ConfigurationModel(SetupStore store) : PageModel
 {
     public string Email { get; private set; } = "";
     public string Folder { get; private set; } = "";
-    public long QuotaGiB { get; private set; }
+    public long QuotaBytes { get; private set; }
 
     public IActionResult OnGet()
     {
@@ -16,7 +16,7 @@ public sealed class ConfigurationModel(SetupStore store) : PageModel
         if (details is null) return RedirectToPage("/Recovery");
         Email = details.Value.Email;
         Folder = details.Value.Folder;
-        QuotaGiB = details.Value.QuotaBytes / (1024L * 1024 * 1024);
+        QuotaBytes = details.Value.QuotaBytes;
         return Page();
     }
 }
