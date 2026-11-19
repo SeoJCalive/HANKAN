@@ -64,6 +64,11 @@
                 <p class="storage-role">보기 권한 · 폴더 탐색과 다운로드 가능</p>
             }
             <p class="storage-quota">사용 @Model.UsedBytes.ToString("N0") B / 전체 @Model.QuotaBytes.ToString("N0") B</p>
+            @if (Model.Current?.State == "owner")
+            {
+                var remaining = Model.QuotaBytes - Model.UsedBytes;
+                <p class="storage-quota">남은 논리적 용량 @((remaining / 1073741824d).ToString("N2")) GiB (@remaining.ToString("N0") B)<br /><small>전체 공용 저장소 기준 · 업로드 예약과 삭제 처리 중인 파일 포함 · 실제 디스크 여유나 업로드 성공을 보장하지 않습니다.</small></p>
+            }
         </div>
 
         @if (Model.DeleteMessage is not null)
@@ -166,7 +171,7 @@
                 <div class="storage-row" role="group" aria-label="파일 @file.OriginalName" tabindex="0" draggable="@(canManage ? "true" : "false")" data-selection-kind="file" data-selection-id="@file.Id" data-open-url="/Files?handler=Download&amp;id=@file.Id">
                     <div class="storage-row__name">
                         <label class="storage-row__select"><input type="checkbox" aria-label="@file.OriginalName 선택" /></label>
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2h9l5 5v15H5zM14 2v6h5M8 13h8M8 17h6" /></svg><span>@file.OriginalName</span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2h9l5 5v15H5zM14 2v6h5M8 13h8M8 17h6" /></svg><span>@file.OriginalName<small class="storage-row__uploader">업로더 · @file.UploaderEmail</small></span>
                     </div>
                     <span class="storage-row__size" data-label="크기">@file.SizeBytes.ToString("N0") B</span>
                     <time class="storage-row__date" datetime="@file.CreatedUtc.ToString("O")">@file.CreatedUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm")</time>
@@ -189,19 +194,21 @@
                                     </details>
                                     <button type="button" class="storage-menu__item" data-move data-kind="file" data-id="@file.Id" data-name="@file.OriginalName" data-parent-id="@(Model.Folder.Id ?? "")">이동</button>
                                     <details class="storage-subaction">
-                                        <summary>링크 공유</summary>
+                                        <summary>공유 만들기</summary>
                                         <form method="post" action="/Shares?handler=Create" class="share-create-form" onsubmit="return this.elements['Mode'].value !== 'public' || confirm('공개 목록에 이 파일의 이름이 표시됩니다. 게시하시겠습니까?');">
                                             @Html.AntiForgeryToken()
                                             <input type="hidden" name="FileId" value="@file.Id" />
                                             <input type="hidden" name="ExpiresUtc" class="expiry-utc" />
-                                            <label>만료 시각 <input type="datetime-local" class="expiry-local" required /></label>
-                                            <p class="field-help">기본 1일. 현재부터 1시간 초과~7일 이내로 선택하세요.</p>
-                                            <label>비밀번호 (선택, 4~128자) <input type="password" name="Password" minlength="4" maxlength="128" autocomplete="new-password" /></label>
+                                            <p>링크 전용 · 주소를 받은 사람에게 전달합니다.</p>
                                             @if (Model.Current?.IsAdmin == true)
                                             {
+                                                <p>공개 목록 · 모든 방문자에게 게시하여 주소를 몰라도 찾을 수 있습니다. 비밀번호가 있어도 파일명이 공개됩니다.</p>
                                                 <label>공유 방식 <select name="Mode"><option value="link">링크 전용</option><option value="public">공개 목록</option></select></label>
                                             }
                                             else { <input type="hidden" name="Mode" value="link" /> }
+                                            <label>만료 시각 <input type="datetime-local" class="expiry-local" required /></label>
+                                            <p class="field-help">기본 1일. 현재부터 1시간 초과~7일 이내로 선택하세요.</p>
+                                            <label>비밀번호 (선택, 4~128자) <input type="password" name="Password" minlength="4" maxlength="128" autocomplete="new-password" /></label>
                                             <button type="submit" class="button-secondary">공유 만들기</button>
                                         </form>
                                     </details>

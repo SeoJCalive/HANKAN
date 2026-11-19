@@ -58,6 +58,7 @@ public sealed class ShareModel(ShareStore shares, FileStore files, FileTransferG
             var file = await files.FindAvailableAsync(Item.Id);
             if (file is null)
             {
+                Item = null;
                 Response.StatusCode = StatusCodes.Status404NotFound;
                 return Page();
             }

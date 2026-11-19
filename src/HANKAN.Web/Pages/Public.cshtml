@@ -7,8 +7,10 @@
 <section class="intro" aria-labelledby="page-title">
     <p class="eyebrow">HANKAN / PUBLIC</p>
     <h1 id="page-title">공개 파일</h1>
-    <p class="lead">관리자가 게시한 파일을 확인하고 다운로드할 수 있습니다.</p>
+    <p class="lead">@(Model.IsReady ? "관리자가 게시한 파일을 확인하고 다운로드할 수 있습니다." : "서비스를 준비 중입니다. 잠시 후 다시 접속하세요.")</p>
 </section>
+@if (Model.IsReady)
+{
 <section class="status-section" aria-labelledby="public-title">
     <div class="section-heading"><h2 id="public-title">게시 목록</h2><span>@Model.Items.Count 개</span></div>
     @if (Model.Items.Count == 0) { <p class="empty-state">현재 공개된 파일이 없습니다.</p> }
@@ -23,3 +25,4 @@
         }
     </div>
 </section>
+}
