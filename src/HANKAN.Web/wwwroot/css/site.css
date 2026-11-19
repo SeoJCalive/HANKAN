@@ -190,7 +190,7 @@ h1 { margin: 0; font-size: var(--type-display); font-weight: 900; letter-spacing
 .storage-menu > summary, .info-tip > summary { display: flex; align-items: center; justify-content: center; width: var(--summary-target); height: var(--summary-target); cursor: pointer; font-size: var(--type-brand); line-height: 1; list-style: none; }
 .storage-menu > summary::-webkit-details-marker, .info-tip > summary::-webkit-details-marker { display: none; }
 .info-anchor { display: flow-root; min-width: 0; }
-.info-anchor > :first-child, .role-options legend { float: inline-start; max-width: calc(100% - var(--summary-target)); }
+.info-anchor > :first-child, .role-options legend { float: inline-start; max-width: calc(100% - var(--summary-target) - var(--space-2)); margin-inline-end: var(--space-2); }
 .info-anchor > :first-child:not(h1, button), .role-options legend { min-height: var(--summary-target); display: inline-flex; align-items: center; margin-block: 0; }
 .info-anchor > h1 + .info-tip > summary { height: max(var(--summary-target), calc(var(--type-display) * 1.05)); }
 .info-anchor > .button-primary { margin: 0; }
