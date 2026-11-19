@@ -6,16 +6,21 @@
 }
 <section class="intro" aria-labelledby="page-title">
     <p class="eyebrow">HANKAN / SHARES</p>
-    <h1 id="page-title">@(Model.IsAdmin ? "전체 공유" : "내 공유")</h1>
-    <p class="lead">파일별 링크와 만료 상태를 관리합니다.</p>
+    <div class="info-anchor">
+        <h1 id="page-title">@(Model.IsAdmin ? "전체 공유" : "내 공유")</h1>
+        @await Html.PartialAsync("_InfoTip", ("공유 목록 관리", "파일별 링크와 만료 상태를 관리합니다.", (string?)null))
+    </div>
 </section>
 @if (Model.Error is not null) { <p class="form-error" role="alert">@Model.Error</p> }
 @if (Model.CreatedToken is not null)
 {
     <section class="notice" aria-label="새 공유 주소">
-        <label for="created-url">새 공유 주소</label>
+        <div class="info-anchor">
+            <label for="created-url">새 공유 주소</label>
+            @await Html.PartialAsync("_InfoTip", ("새 공유 주소", "현재 접속 주소에서 복사합니다. 임시 주소가 바뀌면 새 주소에서 다시 복사해야 합니다.", (string?)null))
+        </div>
         <input id="created-url" class="share-url" readonly data-token="@Model.CreatedToken" />
-        <p class="field-help">현재 접속 주소에서 복사합니다. 외부 전달은 HTTPS 터널 주소로 접속해 복사하세요. 임시 주소가 바뀌면 새 주소에서 다시 복사해야 합니다.</p>
+        <p class="field-help">외부 전달은 HTTPS 터널 주소로 접속해 복사하세요.</p>
     </section>
 }
 <section class="status-section" aria-labelledby="shares-title">

@@ -16,10 +16,10 @@
             @Html.AntiForgeryToken()
             <fieldset class="role-options">
                 <legend>희망 역할</legend>
+                @await Html.PartialAsync("_InfoTip", ("희망 역할", "OWNER는 자신이 만든 링크만 관리합니다. 공개 게시와 다른 사용자의 공유 관리는 관리자 권한입니다.", (string?)null))
                 <label><input type="radio" name="Role" value="VIEWER" checked /> VIEWER <span>파일 목록과 다운로드</span></label>
                 <label><input type="radio" name="Role" value="OWNER" /> OWNER <span>공용 파일 업로드·다운로드·링크 공유, 다른 사용자가 올린 파일과 폴더의 이름 변경·이동·영구 삭제 가능</span></label>
             </fieldset>
-            <p class="field-help">OWNER는 자신이 만든 링크만 관리합니다. 공개 게시와 다른 사용자의 공유 관리는 관리자 권한입니다.</p>
             <button type="submit" class="button-primary">권한 신청</button>
         </form>
     }

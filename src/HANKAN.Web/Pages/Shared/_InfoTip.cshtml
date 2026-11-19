@@ -1,0 +1,9 @@
+@model (string Topic, string Text, string? DescriptionId)
+<details class="info-tip">
+    <summary><span aria-hidden="true">ⓘ</span><span class="visually-hidden">설명 보기: @Model.Topic</span></summary>
+    <p>@Model.Text</p>
+</details>
+@if (Model.DescriptionId is not null)
+{
+    <span class="visually-hidden" id="@Model.DescriptionId">@Model.Text</span>
+}
