@@ -67,8 +67,9 @@
                 <p class="storage-quota">사용 @await Html.PartialAsync("_ByteSize", (Model.UsedBytes, "사용 용량")) / 전체 @await Html.PartialAsync("_ByteSize", (Model.QuotaBytes, "전체 용량"))</p>
                 @if (Model.QuotaBytes > 0 && Model.UsedBytes >= 0)
                 {
+                    var usageDescription = $"사용 {HANKAN.Web.ByteSizeFormatter.Format(Model.UsedBytes).Exact} / 전체 {HANKAN.Web.ByteSizeFormatter.Format(Model.QuotaBytes).Exact}";
                     <meter min="0" max="@Model.QuotaBytes" value="@Math.Min(Model.UsedBytes, Model.QuotaBytes)" aria-label="공용 저장소 사용량"
-                           aria-valuetext="사용 @HANKAN.Web.ByteSizeFormatter.Format(Model.UsedBytes).Exact / 전체 @HANKAN.Web.ByteSizeFormatter.Format(Model.QuotaBytes).Exact"></meter>
+                           aria-valuetext="@usageDescription" aria-description="@usageDescription"></meter>
                 }
                 else { <span>사용률 확인 불가</span> }
             </div>
