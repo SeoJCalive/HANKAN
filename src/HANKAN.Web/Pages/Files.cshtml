@@ -618,7 +618,8 @@
         @Html.AntiForgeryToken()
         <p class="field-help">파일당 100 MB 미만 · 최대 99,999,999바이트</p>
         <p id="upload-status" class="field-help" role="status" aria-live="polite"></p>
-        <div class="storage-dialog__buttons"><button type="button" class="button-secondary" data-close-dialog>취소</button><button id="upload-button" type="button" class="button-primary">업로드</button></div>
+        <p id="upload-check" class="field-help" hidden><a href="@Url.Page("/Files", new { folderId = Model.Folder.Id })">목록을 새로고침해 저장 여부 확인</a></p>
+        <div class="storage-dialog__buttons"><button id="upload-cancel" type="button" class="button-secondary">취소</button><button id="upload-button" type="button" class="button-primary">업로드</button></div>
     </dialog>
     <dialog id="move-dialog" class="storage-dialog" aria-labelledby="move-title">
         <h2 id="move-title">이동할 위치 선택</h2>
@@ -816,9 +817,30 @@
         const input = document.getElementById("upload-file");
         const button = document.getElementById("upload-button");
         const status = document.getElementById("upload-status");
+        const uploadCheck = document.getElementById("upload-check");
+        let uploadController = null;
+        function cancelUpload() {
+            if (uploadController) {
+                uploadController.abort();
+                status.textContent = "업로드 전송을 중단했습니다. 저장 여부는 목록을 새로고침해 확인하세요.";
+                uploadCheck.hidden = false;
+            } else {
+                uploadDialog.close();
+            }
+        }
+        document.getElementById("upload-cancel").addEventListener("click", cancelUpload);
+        uploadDialog.addEventListener("cancel", event => {
+            event.preventDefault();
+            cancelUpload();
+        });
         button.addEventListener("click", async () => {
+            if (uploadController) return;
             if (!input.files.length) { status.textContent = "파일을 선택하세요."; input.focus(); return; }
+            const controller = new AbortController();
+            uploadController = controller;
             button.disabled = true;
+            input.disabled = true;
+            uploadCheck.hidden = true;
             status.textContent = "업로드 중입니다.";
             const data = new FormData();
             data.append("file", input.files[0]);
@@ -827,12 +849,25 @@
                 const response = await fetch("/FileUpload" + (folderId === null ? "" : "?folderId=" + encodeURIComponent(folderId)), {
                     method: "POST",
                     headers: { "RequestVerificationToken": uploadDialog.querySelector('input[name="__RequestVerificationToken"]').value },
-                    body: data
+                    body: data,
+                    signal: controller.signal
                 });
+                if (uploadController !== controller || controller.signal.aborted) return;
                 if (response.ok) { location.assign("/Files" + (folderId === null ? "" : "?folderId=" + encodeURIComponent(folderId))); return; }
-                status.textContent = await response.text();
-            } catch { status.textContent = "연결이 끊겼습니다. 다시 시도하세요."; }
-            button.disabled = false;
+                const message = await response.text();
+                if (uploadController === controller && !controller.signal.aborted) status.textContent = message;
+            } catch (error) {
+                if (uploadController === controller && !controller.signal.aborted) {
+                    if (!(error instanceof Error)) throw error;
+                    status.textContent = "연결이 끊겼습니다. 다시 시도하세요.";
+                }
+            } finally {
+                if (uploadController === controller) {
+                    uploadController = null;
+                    button.disabled = false;
+                    input.disabled = false;
+                }
+            }
         });
     </script>
 }
