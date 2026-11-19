@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
+using System.Globalization;
 using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -33,6 +34,7 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AuthorizePage("/Files", "Viewer");
     options.Conventions.AuthorizePage("/Admin/Users", "Admin");
     options.Conventions.AuthorizePage("/Admin/Audit", "Admin");
+    options.Conventions.AuthorizePage("/Admin/Configuration", "Admin");
     options.Conventions.AuthorizePage("/Shares", "Owner");
 });
 builder.Services.AddScoped<AccessStore>();
@@ -130,11 +132,17 @@ builder.Services.AddRateLimiter(options =>
                 })
             : RateLimitPartition.GetNoLimiter("other");
     });
-    options.OnRejected = async (context, _) =>
+    options.OnRejected = async (context, cancellationToken) =>
     {
         await context.HttpContext.RequestServices.GetRequiredService<AuditStore>()
             .RecordAsync(context.HttpContext.User, "defense.rate_limited", null, "denied");
         context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        context.HttpContext.Response.ContentType = "text/plain; charset=utf-8";
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+            context.HttpContext.Response.Headers.RetryAfter =
+                Math.Max(1, Math.Ceiling(retryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
+        await context.HttpContext.Response.WriteAsync(
+            "요청이 많아 잠시 제한되었습니다. 잠시 후 이전 화면으로 돌아가 다시 시도하세요.", cancellationToken);
     };
 });
 
