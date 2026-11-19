@@ -1,11 +1,11 @@
 function formatByteSize(bytes) {
     if (!Number.isSafeInteger(bytes) || bytes < 0) return { short: "—", exact: null };
-    const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
+    const units = ["B", "KB", "MB", "GB", "TB"];
     const value = BigInt(bytes);
     let scale = 1n, unit = 0;
-    while (value / scale >= 1024n) { scale *= 1024n; unit++; }
+    while (unit < units.length - 1 && value / scale >= 1024n) { scale *= 1024n; unit++; }
     let tenths = (value * 10n + scale / 2n) / scale;
-    if (tenths === 10240n) { tenths = 10n; unit++; }
+    if (unit < units.length - 1 && tenths === 10240n) { tenths = 10n; unit++; }
     return { short: `${Number(tenths) / 10} ${units[unit]}`, exact: `${value.toLocaleString("en-US")} 바이트` };
 }
 

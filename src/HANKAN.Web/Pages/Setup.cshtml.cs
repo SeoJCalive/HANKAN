@@ -25,7 +25,7 @@ public sealed class SetupModel(SetupStore store) : PageModel
         if (store.State != SetupState.Unconfigured) return OnGet();
         if (ModelState.GetFieldValidationState(nameof(QuotaGiB)) == ModelValidationState.Invalid)
         {
-            Error = "전체 용량은 1~1024 GiB의 정수로 입력하세요.";
+            Error = "전체 용량은 1~1024 GB의 정수로 입력하세요.";
             return Page();
         }
         Error = await store.ConfigureAsync(Code ?? "", Email ?? "", Password ?? "", FolderPath ?? "", QuotaGiB);

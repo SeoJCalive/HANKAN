@@ -103,7 +103,7 @@ public sealed class SetupStore
                 return "올바른 관리자 이메일을 입력하세요.";
             if (password.Length is < 12 or > 128)
                 return "비밀번호는 12~128자로 입력하세요.";
-            if (quotaGiB is < 1 or > 1024) return "전체 용량은 1~1024 GiB로 입력하세요.";
+            if (quotaGiB is < 1 or > 1024) return "전체 용량은 1~1024 GB로 입력하세요.";
             if (!Path.IsPathFullyQualified(folderInput)) return "Windows 절대 경로를 입력하세요.";
 
             try

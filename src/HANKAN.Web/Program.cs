@@ -267,7 +267,7 @@ app.MapPost("/FileUpload", async (HttpContext context, IAntiforgery antiforgery,
     catch (InvalidDataException)
     {
         await audit.RecordAsync(context.User, "file.upload", null, "failure");
-        return Results.Text("파일당 100 MB 미만으로 업로드하세요.", statusCode: 413);
+        return Results.Text("파일당 최대 99,999,999바이트(약 95.4 MB)까지 업로드할 수 있습니다.", statusCode: 413);
     }
     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException or DbUpdateException)
     {
