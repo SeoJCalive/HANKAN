@@ -11,6 +11,13 @@
 </section>
 <section class="status-section path-value" aria-labelledby="chain-title">
     <div class="section-heading"><h2 id="chain-title">보존 체인 검증</h2><a href="/Admin/Audit">다시 검증</a></div>
+    <p role="status"><strong>@(Model.Verification.Ok
+        ? $"보존 기록 {Model.Verification.VerifiedCount:N0}건 일치"
+        : $"보존 기록 검증 불일치 · 실패 전 일치 확인 {Model.Verification.VerifiedCount:N0}건")</strong></p>
+    @if (Model.Verification.Ok && Model.Verification.VerifiedCount == 0)
+    {
+        <p>현재 검증 대상인 보존 사건이 없습니다.</p>
+    }
     <p>조회·검증 스냅샷 UTC: @Model.SnapshotUtc.ToString("O")</p>
     <p>체인 시작 UTC: @(Model.Verification.StartedUtc?.ToString("O") ?? "상태 없음")</p>
     <p>검증 순번: @(Model.Verification.FirstSequence?.ToString() ?? "없음") ~ @(Model.Verification.LastSequence?.ToString() ?? "없음"),
@@ -52,12 +59,13 @@
                         <span data-label="시각" class="audit-row__text">CreatedUtc 형식 오류: @item.CreatedUtc</span>
                     }
                     <span data-label="작업자" class="audit-row__text">@Model.Actor(item)</span>
-                    <span data-label="사건" class="audit-row__text">@item.Action
+                    <span data-label="사건" class="audit-row__text">@Model.EventName(item.Action)
+                        <small>@item.Action</small>
                         <small>@(item.Failure is null && item.Id <= Model.Verification.LegacyMaxId && item.ChainSequence is null && item.PreviousMac is null && item.Mac is null
                             ? "배포 전: 검증 범위 밖" : $"체인 순번 {item.ChainSequence?.ToString() ?? "없음"}")</small>
                     </span>
                     <span data-label="대상" class="audit-row__text">@(item.TargetId ?? item.FileId ?? "—")</span>
-                    <strong data-label="결과">@(item.Result switch { "success" => "성공", "denied" => "거부", _ => "실패" })</strong>
+                    <strong data-label="결과">@(item.Result switch { "success" => "성공", "denied" => "거부", "failure" => "실패", _ => "알 수 없는 결과" })<small>@item.Result</small></strong>
                 </div>
             }
         </div>

@@ -27,6 +27,8 @@ body {
     font-family: Arial, "Malgun Gothic", "Noto Sans KR", sans-serif;
     font-size: var(--type-body);
     line-height: 1.5;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
 }
 
 .site-header { border-bottom: 1px solid var(--line-strong); }
@@ -181,6 +183,7 @@ h1 { margin: 0; font-size: var(--type-display); font-weight: 900; letter-spacing
 .storage-row__select { display: flex; align-items: center; justify-content: center; flex: none; width: 2.75rem; min-height: 2.75rem; cursor: pointer; }
 .storage-row__select input { width: var(--space-4); height: var(--space-4); margin: 0; accent-color: var(--ink); cursor: pointer; }
 .storage-row__name span { min-width: 0; overflow-wrap: anywhere; }
+.storage-row__uploader { display: block; color: var(--ink-muted); font-size: var(--type-small); font-weight: 400; }
 .storage-row__size, .storage-row__date { color: var(--ink-muted); font-size: var(--type-small); }
 .storage-row__action { justify-self: end; }
 .storage-row__action a { text-decoration: none; }

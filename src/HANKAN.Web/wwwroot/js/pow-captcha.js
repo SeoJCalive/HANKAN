@@ -25,14 +25,8 @@ document.querySelectorAll("[data-pow-captcha]").forEach(widget => {
     }
 
     form.addEventListener("submit", event => {
-        if (!solution.value) {
-            event.preventDefault();
-            status.textContent = running ? "추가 확인을 계산하고 있습니다." : "추가 확인 버튼을 먼저 누르세요.";
-            if (!running) start.focus();
-        }
-    });
-
-    start.addEventListener("click", () => {
+        if (solution.value) return;
+        event.preventDefault();
         if (running || !form.reportValidity()) return;
         if (!window.Worker || !window.crypto?.subtle) {
             fail();
