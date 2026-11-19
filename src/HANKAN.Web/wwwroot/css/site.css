@@ -198,7 +198,8 @@ h1 { margin: 0; font-size: var(--type-display); font-weight: 900; letter-spacing
 .info-tip > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .info-tip > summary:hover, .info-tip[open] > summary { background: var(--surface-muted); }
 .info-tip > p { clear: both; margin: var(--space-2) 0; padding: var(--space-2) var(--space-4); border: 1px solid var(--line); background: var(--surface); color: var(--ink-muted); font-size: var(--type-small); font-weight: 400; }
-.section-heading > .info-anchor { flex: 1; }
+.section-heading:has(> .info-anchor) { flex-wrap: wrap; }
+.section-heading > .info-anchor { flex: 1 1 12em; }
 .section-heading .info-tip > summary > [aria-hidden] { color: inherit; font-size: inherit; }
 .section-heading > .info-anchor + * { flex: none; }
 .role-options:has(.info-tip) { display: block; min-width: 0; }
