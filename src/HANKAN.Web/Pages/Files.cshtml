@@ -654,7 +654,7 @@
         <p>현재 위치: @string.Join(" / ", Model.Folder.Path.Select(crumb => crumb.Id is null ? "공용 저장소" : crumb.Name))</p>
         <label>업로드할 파일 <input id="upload-file" type="file" required /></label>
         @Html.AntiForgeryToken()
-        <p class="field-help">파일당 100 MB 미만 · 최대 99,999,999바이트</p>
+        <p class="field-help">파일당 최대 99,999,999바이트(약 95.4 MB)</p>
         <p id="upload-status" class="field-help" role="status" aria-live="polite"></p>
         <p id="upload-check" class="field-help" hidden><a href="@Url.Page("/Files", new { folderId = Model.Folder.Id })">목록을 새로고침해 저장 여부 확인</a></p>
         <div class="storage-dialog__buttons"><button id="upload-cancel" type="button" class="button-secondary">취소</button><button id="upload-button" type="button" class="button-primary">업로드</button></div>

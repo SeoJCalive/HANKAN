@@ -28,7 +28,7 @@
         </div>
         <input id="storage-folder" name="FolderPath" type="text" value="@Model.FolderPath" placeholder="C:\HankanFiles" aria-describedby="storage-folder-help storage-registration-help" required />
         <p id="storage-folder-help" class="field-help">비어 있는 Windows 절대 경로를 지정하세요.</p>
-        <label for="quota">전체 용량 한도 (GiB)</label>
+        <label for="quota">전체 용량 한도 (GB)</label>
         <input id="quota" name="QuotaGiB" type="number" min="1" max="1024" value="@Model.QuotaGiB" required />
         <p class="field-help">설정이 완료되면 이 화면은 다시 열리지 않습니다.</p>
         <button type="submit" class="button-primary">설정 완료</button>

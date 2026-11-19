@@ -212,7 +212,7 @@ public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGat
                 return "올바른 폴더를 선택하세요.";
             var (used, quota) = await UsageAsync();
             reservation = Math.Min(MaxFileBytes, Math.Min(quota - used, free - 1_073_741_824L));
-            if (reservation <= 0) return "전체 용량 또는 1 GiB 여유를 제외한 디스크 공간이 부족합니다.";
+            if (reservation <= 0) return "전체 용량 또는 1 GB 여유를 제외한 디스크 공간이 부족합니다.";
             file.ReservedBytes = reservation;
             db.StoredFiles.Add(file);
             await db.SaveChangesAsync(cancellation);
@@ -235,7 +235,7 @@ public sealed class FileStore(AppDbContext db, SetupStore setup, FileTransferGat
                 var read = await body.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellation);
                 if (read == 0) break;
                 if (memory.Length + read > reservation || memory.Length + read > MaxFileBytes)
-                    return "파일당 100 MB 미만이며 전체 용량과 디스크 여유 1 GiB를 제외한 남은 용량 안에서만 업로드할 수 있습니다.";
+                    return "파일당 최대 99,999,999바이트(약 95.4 MB)이며 전체 용량과 디스크 여유 1 GB를 제외한 남은 용량 안에서만 업로드할 수 있습니다.";
                 await memory.WriteAsync(buffer.AsMemory(0, read), cancellation);
             }
             plain = memory.ToArray();
