@@ -7,7 +7,7 @@
 <section class="intro" aria-labelledby="page-title">
     <p class="eyebrow">HANKAN / SHARED FILE</p>
     <h1 id="page-title">@(Model.Item is null ? "이 공유는 사용할 수 없습니다" : "공유 파일")</h1>
-    <p class="lead">@(Model.Item is null ? "보낸 사람에게 새 링크를 요청하세요." : "만료 시각 전까지 파일을 다운로드할 수 있습니다.")</p>
+    @if (Model.Item is null) { <p class="lead">보낸 사람에게 새 링크를 요청하세요.</p> }
 </section>
 @if (Model.Item is not null)
 {
@@ -16,7 +16,7 @@
         <dl class="status-list">
             <div class="status-row"><dt>파일 이름</dt><dd>@Model.Item.Name</dd></div>
             <div class="status-row"><dt>크기</dt><dd>@Model.Item.SizeBytes.ToString("N0") B</dd></div>
-            <div class="status-row"><dt>만료</dt><dd>@Model.Item.ExpiresUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm")</dd></div>
+            <div class="status-row"><dt class="info-anchor"><span>만료</span> @await Html.PartialAsync("_InfoTip", ("만료", "만료 시각 전까지 파일을 다운로드할 수 있습니다.", (string?)null))</dt><dd>@Model.Item.ExpiresUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm")</dd></div>
         </dl>
     </section>
     <form method="post" action="/Share/@RouteData.Values["token"]?handler=Download" class="setup-form share-download">
@@ -30,8 +30,11 @@
                 <div data-pow-captcha>
                     <input type="hidden" name="Challenge" value="@Model.PowChallenge" />
                     <input type="hidden" name="Solution" value="" />
-                    <button type="submit" class="button-primary" data-pow-start aria-describedby="pow-status">추가 확인 후 다운로드</button>
-                    <p id="pow-status" role="status" aria-live="polite">추가 확인을 누르면 계산 후 폼을 제출합니다.</p>
+                    <div class="info-anchor">
+                        <button type="submit" class="button-primary" data-pow-start aria-describedby="pow-help pow-status">추가 확인 후 다운로드</button>
+                        @await Html.PartialAsync("_InfoTip", ("추가 확인 후 다운로드", "추가 확인을 누르면 계산 후 폼을 제출합니다.", "pow-help"))
+                    </div>
+                    <p id="pow-status" role="status" aria-live="polite"></p>
                     <noscript>추가 확인에는 JavaScript가 필요합니다. 사용을 켜거나 실패 집계 만료 후 다시 시도하세요.</noscript>
                 </div>
             }

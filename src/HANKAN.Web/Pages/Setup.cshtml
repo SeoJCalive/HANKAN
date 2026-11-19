@@ -22,12 +22,15 @@
         <label for="admin-password">관리자 비밀번호</label>
         <input id="admin-password" name="Password" type="password" autocomplete="new-password" minlength="12" maxlength="128" aria-describedby="admin-password-help" required />
         <p id="admin-password-help" class="field-help">12~128자. 이 계정의 비밀번호는 자동 복구할 수 없습니다.</p>
-        <label for="storage-folder">파일 저장 폴더</label>
-        <input id="storage-folder" name="FolderPath" type="text" value="@Model.FolderPath" placeholder="C:\HankanFiles" aria-describedby="storage-folder-help" required />
-        <p id="storage-folder-help" class="field-help">비어 있는 Windows 절대 경로를 지정하세요. 기존 파일은 자동 등록되지 않습니다.</p>
+        <div class="info-anchor">
+            <label for="storage-folder">파일 저장 폴더</label>
+            @await Html.PartialAsync("_InfoTip", ("파일 저장 폴더", "기존 파일은 자동 등록되지 않습니다.", "storage-registration-help"))
+        </div>
+        <input id="storage-folder" name="FolderPath" type="text" value="@Model.FolderPath" placeholder="C:\HankanFiles" aria-describedby="storage-folder-help storage-registration-help" required />
+        <p id="storage-folder-help" class="field-help">비어 있는 Windows 절대 경로를 지정하세요.</p>
         <label for="quota">전체 용량 한도 (GiB)</label>
         <input id="quota" name="QuotaGiB" type="number" min="1" max="1024" value="@Model.QuotaGiB" required />
+        <p class="field-help">설정이 완료되면 이 화면은 다시 열리지 않습니다.</p>
         <button type="submit" class="button-primary">설정 완료</button>
     </form>
 </section>
-<p class="footnote">설정이 완료되면 이 화면은 다시 열리지 않습니다.</p>

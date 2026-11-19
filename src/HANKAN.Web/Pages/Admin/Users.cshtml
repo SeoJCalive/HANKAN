@@ -7,12 +7,17 @@
 <section class="intro" aria-labelledby="page-title">
     <p class="eyebrow">HANKAN / ADMIN</p>
     <h1 id="page-title">사용자 관리</h1>
-    <p class="lead">권한 신청을 처리하고 승인된 계정의 역할을 관리합니다.</p>
 </section>
 @if (Model.Error is not null) { <p class="form-error" role="alert">@Model.Error</p> }
 <section class="status-section" aria-labelledby="users-title">
-    <div class="section-heading"><h2 id="users-title">일반 계정</h2><span>@Model.Accounts.Count 명</span></div>
-    <p id="owner-role-help" class="field-help">VIEWER는 공용 파일 탐색·다운로드 역할입니다. OWNER는 공용 파일 업로드·다운로드·링크 공유, 다른 사용자가 올린 파일과 폴더의 이름 변경·이동·영구 삭제가 가능합니다. 자신이 만든 링크만 관리하며, 공개 게시와 다른 사용자의 공유 관리는 관리자 권한입니다.</p>
+    <div class="section-heading">
+        <div class="info-anchor">
+            <h2 id="users-title">일반 계정</h2>
+            @await Html.PartialAsync("_InfoTip", ("역할 부여", "권한 신청을 처리하고 승인된 계정의 역할을 관리합니다. VIEWER는 공용 파일 탐색·다운로드 역할입니다. OWNER는 자신이 만든 링크만 관리하며, 공개 게시와 다른 사용자의 공유 관리는 관리자 권한입니다.", "role-details"))
+        </div>
+        <span>@Model.Accounts.Count 명</span>
+    </div>
+    <p id="owner-role-help" class="field-help">OWNER는 공용 파일 업로드·다운로드·링크 공유, 다른 사용자가 올린 파일과 폴더의 이름 변경·이동·영구 삭제가 가능합니다.</p>
     @if (Model.Accounts.Count == 0) { <p class="empty-state">가입한 일반 계정이 없습니다.</p> }
     @foreach (var account in Model.Accounts)
     {
@@ -30,7 +35,7 @@
                         @Html.AntiForgeryToken()
                         <input type="hidden" name="TargetId" value="@account.Id" />
                         <input type="hidden" name="Action" value="grant" />
-                        <label>부여할 역할 <select name="Role" aria-describedby="owner-role-help"><option value="VIEWER">VIEWER</option><option value="OWNER">OWNER</option></select></label>
+                        <label>부여할 역할 <select name="Role" aria-describedby="owner-role-help role-details"><option value="VIEWER">VIEWER</option><option value="OWNER">OWNER · 다른 사용자 파일·폴더 영구 삭제 가능</option></select></label>
                         <button type="submit" class="button-secondary">역할 부여</button>
                     </form>
                 }

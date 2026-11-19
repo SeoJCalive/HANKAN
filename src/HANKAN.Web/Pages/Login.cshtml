@@ -7,8 +7,10 @@
 
 <section class="auth-panel" aria-labelledby="page-title">
     <p class="eyebrow">HANKAN / ACCOUNT</p>
-    <h1 id="page-title">로그인</h1>
-    <p class="lead">계정으로 로그인하면 현재 접근 상태를 확인할 수 있습니다.</p>
+    <div class="info-anchor">
+        <h1 id="page-title">로그인</h1>
+        @await Html.PartialAsync("_InfoTip", ("로그인", "계정으로 로그인하면 현재 접근 상태를 확인할 수 있습니다.", (string?)null))
+    </div>
     <form method="post" class="setup-form">
         @Html.AntiForgeryToken()
         @if (Model.Error is not null) { <p class="form-error" role="alert">@Model.Error</p> }
@@ -21,8 +23,11 @@
             <div data-pow-captcha>
                 <input type="hidden" name="Challenge" value="@Model.PowChallenge" />
                 <input type="hidden" name="Solution" value="" />
-                <button type="submit" class="button-primary" data-pow-start aria-describedby="pow-status">추가 확인 후 로그인</button>
-                <p id="pow-status" role="status" aria-live="polite">추가 확인을 누르면 계산 후 폼을 제출합니다.</p>
+                <div class="info-anchor">
+                    <button type="submit" class="button-primary" data-pow-start aria-describedby="pow-help pow-status">추가 확인 후 로그인</button>
+                    @await Html.PartialAsync("_InfoTip", ("추가 확인 후 로그인", "추가 확인을 누르면 계산 후 폼을 제출합니다.", "pow-help"))
+                </div>
+                <p id="pow-status" role="status" aria-live="polite"></p>
                 <noscript>추가 확인에는 JavaScript가 필요합니다. 사용을 켜거나 실패 집계 만료 후 다시 시도하세요.</noscript>
             </div>
         }
