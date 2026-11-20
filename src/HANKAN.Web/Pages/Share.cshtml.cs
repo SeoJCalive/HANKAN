@@ -95,7 +95,8 @@ public sealed class ShareModel(ShareStore shares, FileStore files, FileTransferG
     private void PrepareCaptcha()
     {
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-        CaptchaRequired = Item is { PasswordNeeded: true } && pow.IsRequired("share", Item.ShareId, ip);
+        CaptchaRequired = AccessModeRuntime.PasswordsAllowed(HttpContext) &&
+            Item is { PasswordNeeded: true } && pow.IsRequired("share", Item.ShareId, ip);
         PowChallenge = CaptchaRequired ? pow.Issue("share", Item!.ShareId, ip) : null;
         Solution = null;
     }

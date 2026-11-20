@@ -58,7 +58,7 @@ public sealed class LoginModel(SetupStore store, UserManager<AppUser> users, Sig
     private void PrepareCaptcha(string? subject)
     {
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-        CaptchaRequired = pow.IsRequired("login", subject, ip);
+        CaptchaRequired = AccessModeRuntime.PasswordsAllowed(HttpContext) && pow.IsRequired("login", subject, ip);
         PowChallenge = CaptchaRequired ? pow.Issue("login", "", ip) : null;
         Solution = null;
     }

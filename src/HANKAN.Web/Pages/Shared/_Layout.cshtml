@@ -1,5 +1,6 @@
 @inject HANKAN.Web.AccessStore Access
 @inject HANKAN.Web.SetupStore Setup
+@inject HANKAN.Web.AccessModeRuntime AccessMode
 @{
     var current = await Access.CurrentAsync(User);
 }
@@ -42,6 +43,19 @@
         </div>
     </header>
     <main id="main-content" class="page-shell">
+        @if (!HANKAN.Web.AccessModeRuntime.PasswordsAllowed(Context) &&
+            !(Context.Items["HANKAN.LocalControl"] is true && Setup.State != HANKAN.Web.SetupState.Ready))
+        {
+            <p class="notice" role="status">HTTP는 평문 전송으로 파일·링크·입력 내용의 전송 기밀성과 무결성을 보장하지 않습니다. 로그인·가입·비밀번호 공유·공유 생성은 HTTPS에서 이용하세요.</p>
+        }
+        @if (Context.Items["HANKAN.LocalControl"] is true && AccessMode.Failure is not null)
+        {
+            <p class="notice" role="alert">접속 모드 적용 실패: @AccessMode.Failure. 외부 수신을 닫고 로컬 전용으로 실행 중입니다.</p>
+        }
+        @if (Context.Items["HANKAN.LocalControl"] is true && AccessMode.RestartRequired)
+        {
+            <p class="notice">선택한 접속 모드는 최초 설정 완료 후 앱을 재시작해야 적용됩니다.</p>
+        }
         @RenderBody()
     </main>
 </body>

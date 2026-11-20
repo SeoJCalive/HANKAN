@@ -14,6 +14,10 @@ using System.Threading.RateLimiting;
 using HANKAN.Web;
 
 var builder = WebApplication.CreateBuilder(args);
+var port = int.TryParse(Environment.GetEnvironmentVariable("HANKAN_PORT"), out var configuredPort) && configuredPort is > 1023 and < 65536
+    ? configuredPort : 5180;
+var accessMode = new AccessModeRuntime(AccessModeSettings.Local, port);
+builder.Services.AddSingleton(accessMode);
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 100_100_000);
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -26,7 +30,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.RequireHeaderSymmetry = true;
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
-    options.KnownProxies.Add(IPAddress.Loopback);
+    foreach (var ip in accessMode.Requested.TrustedProxyIps)
+        options.KnownProxies.Add(AccessModeSettings.Normalize(IPAddress.Parse(ip)));
 });
 builder.Services.AddRazorPages(options =>
 {
@@ -37,6 +42,8 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AuthorizePage("/Admin/Configuration", "Admin");
     options.Conventions.AuthorizePage("/Shares", "Owner");
 });
+builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(options =>
+    options.Filters.Add<PasswordTransportFilter>());
 builder.Services.AddScoped<AccessStore>();
 builder.Services.AddScoped<FileStore>();
 builder.Services.AddScoped<FolderStore>();
@@ -104,7 +111,7 @@ builder.Services.AddRateLimiter(options =>
             return RateLimitPartition.GetNoLimiter("other");
 
         var path = context.Request.Path;
-        var ip = context.Connection.RemoteIpAddress;
+        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         var userId = context.User.Identity?.IsAuthenticated == true
             ? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
             : null;
@@ -159,8 +166,6 @@ builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 
 var app = builder.Build();
 var setup = app.Services.GetRequiredService<SetupStore>();
-var port = int.TryParse(Environment.GetEnvironmentVariable("HANKAN_PORT"), out var configuredPort) && configuredPort is > 1023 and < 65536
-    ? configuredPort : 5180;
 var startupId = Environment.GetEnvironmentVariable("HANKAN_STARTUP_ID");
 if (setup.State == SetupState.Ready)
 {
@@ -186,6 +191,8 @@ else if (setup.State == SetupState.RecoveryRequired)
     Console.Error.WriteLine("한칸(HANKAN) 데이터 또는 저장소를 확인할 수 없습니다. 복구가 필요합니다.");
 app.Use(async (context, next) =>
 {
+    context.Response.Headers.XContentTypeOptions = "nosniff";
+    context.Response.Headers.XFrameOptions = "DENY";
     if (!context.Request.Path.Equals("/_local/startup", StringComparison.OrdinalIgnoreCase))
     {
         await next();
@@ -193,13 +200,7 @@ app.Use(async (context, next) =>
     }
     context.Response.Headers.CacheControl = "no-store";
     if (!HttpMethods.IsGet(context.Request.Method) ||
-        !IPAddress.Loopback.Equals(context.Connection.RemoteIpAddress) ||
-        !IPAddress.Loopback.Equals(context.Connection.LocalIpAddress) ||
-        context.Connection.LocalPort != port ||
-        context.Request.Headers.Keys.Any(name =>
-            name.StartsWith("X-Forwarded-", StringComparison.OrdinalIgnoreCase) ||
-            name.StartsWith("CF-", StringComparison.OrdinalIgnoreCase) ||
-            name.Equals("Forwarded", StringComparison.OrdinalIgnoreCase)) ||
+        !accessMode.IsLocalControl(context) ||
         string.IsNullOrEmpty(startupId) ||
         context.Request.Headers["X-Hankan-Startup-Id"].Count != 1 ||
         context.Request.Headers["X-Hankan-Startup-Id"][0] != startupId)
@@ -211,21 +212,8 @@ app.Use(async (context, next) =>
     context.Response.StatusCode = ready ? 200 : 503;
     await context.Response.WriteAsJsonAsync(new { setupReady = ready, processId = Environment.ProcessId });
 });
-app.UseWhen(context =>
-{
-    var forwardedIp = context.Request.Headers["CF-Connecting-IP"];
-    var forwardedProto = context.Request.Headers["X-Forwarded-Proto"];
-    return IPAddress.Loopback.Equals(context.Connection.RemoteIpAddress)
-        && forwardedIp.Count == 1
-        && IPAddress.TryParse(forwardedIp[0], out _)
-        && forwardedProto.Count == 1
-        && (string.Equals(forwardedProto[0], "https", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(forwardedProto[0], "http", StringComparison.OrdinalIgnoreCase));
-}, branch => branch.UseForwardedHeaders());
 app.Use(async (context, next) =>
 {
-    context.Response.Headers.XContentTypeOptions = "nosniff";
-    context.Response.Headers.XFrameOptions = "DENY";
     if (string.Equals(context.Request.Path.Value?.TrimEnd('/'), "/Login", StringComparison.OrdinalIgnoreCase) ||
         context.Request.Path.StartsWithSegments("/Share", StringComparison.OrdinalIgnoreCase))
     {
@@ -239,6 +227,42 @@ app.Use(async (context, next) =>
         context.Response.Headers["Referrer-Policy"] = "no-referrer";
         context.Response.Headers.CacheControl = "no-store";
     }
+    await next();
+});
+app.Use(async (context, next) =>
+{
+    var localControl = accessMode.IsLocalControl(context);
+    context.Items["HANKAN.LocalControl"] = localControl;
+    if ((context.Request.Path.StartsWithSegments("/Setup", StringComparison.OrdinalIgnoreCase) ||
+         context.Request.Path.StartsWithSegments("/Recovery", StringComparison.OrdinalIgnoreCase)) && !localControl)
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsync("설정과 복구는 서버 PC의 로컬 주소에서 진행하세요.");
+        return;
+    }
+    context.Items["HANKAN.DirectTls"] = context.Request.IsHttps;
+    if (context.Connection.RemoteIpAddress is { } peer)
+        context.Connection.RemoteIpAddress = AccessModeSettings.Normalize(peer);
+    var trusted = accessMode.IsTrustedPeer(context.Connection.RemoteIpAddress);
+    // Control pages retain their original local connection; they never consume forwarding.
+    var controlPage = context.Request.Path.StartsWithSegments("/Setup", StringComparison.OrdinalIgnoreCase) ||
+        context.Request.Path.StartsWithSegments("/Recovery", StringComparison.OrdinalIgnoreCase);
+    if (trusted && !controlPage && !AccessModeRuntime.ValidForwarding(context.Request))
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsync("전달 헤더가 올바르지 않습니다. HTTP는 평문 전송이며 비밀번호 기능에는 HTTPS가 필요합니다.");
+        return;
+    }
+    context.Items["HANKAN.Forward"] = trusted && !controlPage;
+    await next();
+});
+app.UseWhen(context => context.Items["HANKAN.Forward"] is true, branch => branch.UseForwardedHeaders());
+app.Use(async (context, next) =>
+{
+    if (context.Connection.RemoteIpAddress is { } ip)
+        context.Connection.RemoteIpAddress = AccessModeSettings.Normalize(ip);
+    context.Items["HANKAN.PasswordTransport"] = context.Items["HANKAN.DirectTls"] is true ||
+        accessMode.EffectiveMode == "tunnel" && context.Items["HANKAN.Forward"] is true && context.Request.IsHttps;
     await next();
 });
 app.UseStaticFiles();
