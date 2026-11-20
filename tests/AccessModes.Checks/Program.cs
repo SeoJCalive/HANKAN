@@ -2,10 +2,7 @@ using System.Text.Json;
 using HANKAN.Web;
 using System.Net;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Microsoft.AspNetCore.Routing;
 
 var directory = Path.Combine(Path.GetTempPath(), "hankan-check-" + Guid.NewGuid().ToString("N"));
 var webRoot = Path.Combine(directory, "wwwroot");
@@ -67,14 +64,10 @@ foreach (var page in new[] { "/Login", "/Register", "/Shares" })
     var http = new DefaultHttpContext();
     http.Request.Method = "POST";
     http.Request.QueryString = new QueryString("?handler=cReAtE");
-    var action = new ActionContext(http, new RouteData(), new PageActionDescriptor { ViewEnginePath = page });
-    var context = new AuthorizationFilterContext(action, []);
-    await new PasswordTransportFilter().OnAuthorizationAsync(context);
-    Require(context.Result is ContentResult { StatusCode: 403 }, "HTTP password POST");
+    var descriptor = new PageActionDescriptor { ViewEnginePath = page };
+    Require(await PasswordTransportFilter.RequiresHttpsAsync(http, descriptor), "HTTP password POST");
     http.Items["HANKAN.PasswordTransport"] = true;
-    context.Result = null;
-    await new PasswordTransportFilter().OnAuthorizationAsync(context);
-    Require(context.Result is null, "HTTPS continues existing validation");
+    Require(!await PasswordTransportFilter.RequiresHttpsAsync(http, descriptor), "HTTPS continues existing validation");
 }
 Console.WriteLine("PASS: peer trust, one-hop header validation, HTTP password rejection, HTTPS continuation");
 foreach (var state in new[] { SetupState.Unconfigured, SetupState.RecoveryRequired })
@@ -96,3 +89,11 @@ using (var mode = new AccessModeRuntime(trustSettings, 55180))
     Require(mode.EffectiveMode == "local" && !mode.Applied, "Forced local never opens tunnel");
 }
 Console.WriteLine("PASS: startup setup invariant, mode application, local fallback");
+Require(HankanChild.AllowedTunnelLine("debug token=sample-secret", "sample-secret", false) == "", "Token/debug dropped");
+Require(HankanChild.AllowedTunnelLine("Registered tunnel connection protocol=http2 token=sample-secret", "sample-secret", false)
+    == "tunnel connection ready", "Connection output whitelist");
+Require(HankanChild.AllowedTunnelLine("URL https://sample.trycloudflare.com", "", true)
+    == "https://sample.trycloudflare.com", "Quick URL extraction");
+Require(HankanChild.AllowedTunnelLine("URL https://sample.trycloudflare.com", "", false) == "", "Fixed never adopts Quick URL");
+Require(HankanChild.AllowedTunnelLine("URL https://sample.trycloudflare.com", "sample", true) == "", "Redact before extraction");
+Console.WriteLine("PASS: tunnel output whitelist, token removal, Quick/fixed separation");

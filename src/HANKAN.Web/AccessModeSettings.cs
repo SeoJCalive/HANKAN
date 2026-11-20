@@ -20,6 +20,9 @@ public sealed record AccessModeSettings
         AccessSecrets.CheckPath(path, webRoot);
         if (!File.Exists(path)) return Local;
         AccessSecrets.CheckPermissions(path, allowAdministrators: true);
+        var marker = Path.Combine(dataDirectory, "access-mode.initialized");
+        AccessSecrets.CheckPath(marker, webRoot);
+        if (!File.Exists(marker)) File.WriteAllText(marker, "v1");
         return Parse(File.ReadAllText(path), dataDirectory, webRoot, localPort);
     }
 

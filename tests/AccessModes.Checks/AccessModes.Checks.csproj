@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/HANKAN.Web/HANKAN.Web.csproj" />
+    <Compile Include="../../scripts/HankanProcessHost.cs" Link="HankanProcessHost.cs" />
   </ItemGroup>
 </Project>

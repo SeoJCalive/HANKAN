@@ -254,6 +254,10 @@ async Task<WebApplication> BuildApplicationAsync(AccessModeRuntime? previousMode
     {
         context.Response.Headers.XContentTypeOptions = "nosniff";
         context.Response.Headers.XFrameOptions = "DENY";
+        if (accessMode.EffectiveMode == "direct" &&
+            accessMode.Requested.Direct is { Transport: "https" } tls &&
+            context.Connection.LocalPort == tls.Port && context.Request.IsHttps)
+            context.Response.Headers.StrictTransportSecurity = "max-age=3600";
         if (!context.Request.Path.Equals("/_local/startup", StringComparison.OrdinalIgnoreCase))
         {
             await next();
@@ -307,7 +311,7 @@ async Task<WebApplication> BuildApplicationAsync(AccessModeRuntime? previousMode
              context.Request.Path.StartsWithSegments("/Recovery", StringComparison.OrdinalIgnoreCase)) && !localControl)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsync("설정과 복구는 서버 PC의 로컬 주소에서 진행하세요.");
+            await context.Response.WriteAsync("설정과 복구는 서버 PC의 로컬 주소에서 진행하세요. HTTP는 평문 전송입니다.");
             return;
         }
         context.Items["HANKAN.DirectTls"] = context.Request.IsHttps;
@@ -339,8 +343,6 @@ async Task<WebApplication> BuildApplicationAsync(AccessModeRuntime? previousMode
     {
         if (accessMode.EffectiveMode == "direct" && accessMode.Requested.Direct is { Transport: "https" } direct)
         {
-            if (context.Connection.LocalPort == direct.Port && context.Items["HANKAN.DirectTls"] is true)
-                context.Response.Headers.StrictTransportSecurity = "max-age=3600";
             if (context.Connection.LocalPort == direct.RedirectHttpPort)
             {
                 // This listener only redirects safe navigation; never replay a password body.
@@ -358,8 +360,30 @@ async Task<WebApplication> BuildApplicationAsync(AccessModeRuntime? previousMode
         }
         await next();
     });
+    app.UseStatusCodePages(async status =>
+    {
+        var response = status.HttpContext.Response;
+        response.ContentType = "text/plain; charset=utf-8";
+        response.Headers.CacheControl = "no-store";
+        await response.WriteAsync("요청을 처리할 수 없습니다." +
+            (AccessModeRuntime.PasswordsAllowed(status.HttpContext) ? "" :
+                " HTTP는 평문 전송입니다. 비밀번호 기능은 HTTPS에서 이용하세요."));
+    });
     app.UseStaticFiles();
     app.UseRouting();
+    app.Use(async (context, next) =>
+    {
+        var page = context.GetEndpoint()?.Metadata.GetMetadata<Microsoft.AspNetCore.Mvc.RazorPages.PageActionDescriptor>();
+        if (await PasswordTransportFilter.RequiresHttpsAsync(context, page))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "text/plain; charset=utf-8";
+            context.Response.Headers.CacheControl = "no-store";
+            await context.Response.WriteAsync(AccessModeRuntime.HttpsRequired);
+            return;
+        }
+        await next();
+    });
     app.UseAuthentication();
     app.UseRateLimiter();
     app.UseAuthorization();

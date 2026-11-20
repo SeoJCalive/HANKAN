@@ -1,20 +1,18 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace HANKAN.Web;
 
-// Authorization-stage rejection precedes antiforgery's form read and model binding.
-public sealed class PasswordTransportFilter : IAsyncAuthorizationFilter, IAsyncResourceFilter, IOrderedFilter
+public sealed class PasswordTransportFilter : IAsyncResourceFilter, IOrderedFilter
 {
     public int Order => int.MinValue;
 
-    public async Task OnAuthorizationAsync(AuthorizationFilterContext context)
+    // Called after endpoint selection, before authentication/authorization and antiforgery.
+    public static async Task<bool> RequiresHttpsAsync(HttpContext http, PageActionDescriptor? descriptor)
     {
-        var http = context.HttpContext;
-        if (!HttpMethods.IsPost(http.Request.Method) || AccessModeRuntime.PasswordsAllowed(http)) return;
-        var page = (context.ActionDescriptor as PageActionDescriptor)?.ViewEnginePath;
+        if (!HttpMethods.IsPost(http.Request.Method) || AccessModeRuntime.PasswordsAllowed(http)) return false;
+        var page = descriptor?.ViewEnginePath;
         var forbidden = page is "/Login" or "/Register";
         if (page == "/Shares")
         {
@@ -28,13 +26,7 @@ public sealed class PasswordTransportFilter : IAsyncAuthorizationFilter, IAsyncR
             var item = await http.RequestServices.GetRequiredService<ShareStore>().FindActiveAsync(token);
             forbidden = item?.PasswordNeeded == true;
         }
-        if (forbidden)
-            context.Result = new ContentResult
-            {
-                StatusCode = StatusCodes.Status403Forbidden,
-                ContentType = "text/plain; charset=utf-8",
-                Content = AccessModeRuntime.HttpsRequired
-            };
+        return forbidden;
     }
 
     public async Task OnResourceExecutionAsync(ResourceExecutingContext context, ResourceExecutionDelegate next)
