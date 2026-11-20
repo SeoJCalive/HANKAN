@@ -108,11 +108,18 @@ public static class HankanProcessJob
     Add-Content -LiteralPath $runLog -Value "$(Get-Date -Format o) url-watcher=$($watcher.Id) host=$PID"
     [HankanProcessJob]::Attach()
 
-    $env:HANKAN_DATA_DIR = $DataDir
-    $env:HANKAN_PORT = $Port.ToString()
-    $serverCommand = '"{0}" run --no-build --project "{1}" > "{2}" 2>&1' -f $dotnet, $project, $serverLog
-    $server = Start-Process -FilePath $env:ComSpec -ArgumentList ('/d /s /c "' + $serverCommand + '"') `
-        -WorkingDirectory $RepoPath -WindowStyle Hidden -PassThru
+    $startupId = [Guid]::NewGuid().ToString('N')
+    $serverCommand = '"{0}" run --no-build --no-launch-profile --project "{1}" > "{2}" 2>&1' -f $dotnet, $project, $serverLog
+    $serverInfo = New-Object Diagnostics.ProcessStartInfo
+    $serverInfo.FileName = $env:ComSpec
+    $serverInfo.Arguments = '/d /s /c "' + $serverCommand + '"'
+    $serverInfo.WorkingDirectory = $RepoPath
+    $serverInfo.UseShellExecute = $false
+    $serverInfo.CreateNoWindow = $true
+    $serverInfo.EnvironmentVariables['HANKAN_DATA_DIR'] = $DataDir
+    $serverInfo.EnvironmentVariables['HANKAN_PORT'] = $Port.ToString()
+    $serverInfo.EnvironmentVariables['HANKAN_STARTUP_ID'] = $startupId
+    $server = [Diagnostics.Process]::Start($serverInfo)
     Add-Content -LiteralPath $runLog -Value "$(Get-Date -Format o) $TaskName host=$PID server-wrapper=$($server.Id) port=$Port"
 
     $deadline = (Get-Date).AddSeconds(60)
@@ -120,11 +127,15 @@ public static class HankanProcessJob
     while ((Get-Date) -lt $deadline) {
         if ($server.HasExited) { throw "Server exited before readiness; see $serverLog" }
         try {
-            $request = [Net.HttpWebRequest]::Create("http://127.0.0.1:$Port/Login")
+            $request = [Net.HttpWebRequest]::Create("http://127.0.0.1:$Port/_local/startup")
             $request.AllowAutoRedirect = $false
             $request.Timeout = 2000
+            $request.Headers.Add('X-Hankan-Startup-Id', $startupId)
             $response = $request.GetResponse()
-            $ready = [int]$response.StatusCode -in @(200, 302)
+            $reader = New-Object IO.StreamReader($response.GetResponseStream())
+            $status = $reader.ReadToEnd() | ConvertFrom-Json
+            $reader.Dispose()
+            $ready = [int]$response.StatusCode -eq 200 -and $status.setupReady -eq $true -and $status.processId -gt 0
             $response.Close()
         } catch [Net.WebException] {
             $ready = $false

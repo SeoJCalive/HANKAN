@@ -159,6 +159,9 @@ builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 
 var app = builder.Build();
 var setup = app.Services.GetRequiredService<SetupStore>();
+var port = int.TryParse(Environment.GetEnvironmentVariable("HANKAN_PORT"), out var configuredPort) && configuredPort is > 1023 and < 65536
+    ? configuredPort : 5180;
+var startupId = Environment.GetEnvironmentVariable("HANKAN_STARTUP_ID");
 if (setup.State == SetupState.Ready)
 {
     using var scope = app.Services.CreateScope();
@@ -173,9 +176,41 @@ if (setup.State == SetupState.Ready)
     }
 }
 if (setup.State == SetupState.Unconfigured)
-    Console.WriteLine($"한칸(HANKAN) 최초 설정 코드: {setup.SetupCode}");
+{
+    if (string.IsNullOrEmpty(startupId))
+        Console.WriteLine($"한칸(HANKAN) 최초 설정 코드: {setup.SetupCode}");
+    else
+        Console.WriteLine("한칸(HANKAN) 수동 콘솔에서 최초 설정이 필요합니다.");
+}
 else if (setup.State == SetupState.RecoveryRequired)
     Console.Error.WriteLine("한칸(HANKAN) 데이터 또는 저장소를 확인할 수 없습니다. 복구가 필요합니다.");
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Path.Equals("/_local/startup", StringComparison.OrdinalIgnoreCase))
+    {
+        await next();
+        return;
+    }
+    context.Response.Headers.CacheControl = "no-store";
+    if (!HttpMethods.IsGet(context.Request.Method) ||
+        !IPAddress.Loopback.Equals(context.Connection.RemoteIpAddress) ||
+        !IPAddress.Loopback.Equals(context.Connection.LocalIpAddress) ||
+        context.Connection.LocalPort != port ||
+        context.Request.Headers.Keys.Any(name =>
+            name.StartsWith("X-Forwarded-", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("CF-", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("Forwarded", StringComparison.OrdinalIgnoreCase)) ||
+        string.IsNullOrEmpty(startupId) ||
+        context.Request.Headers["X-Hankan-Startup-Id"].Count != 1 ||
+        context.Request.Headers["X-Hankan-Startup-Id"][0] != startupId)
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
+    }
+    var ready = app.Lifetime.ApplicationStarted.IsCancellationRequested && setup.State == SetupState.Ready;
+    context.Response.StatusCode = ready ? 200 : 503;
+    await context.Response.WriteAsJsonAsync(new { setupReady = ready, processId = Environment.ProcessId });
+});
 app.UseWhen(context =>
 {
     var forwardedIp = context.Request.Headers["CF-Connecting-IP"];
@@ -277,6 +312,4 @@ app.MapPost("/FileUpload", async (HttpContext context, IAntiforgery antiforgery,
     finally { gate.Transfer.Release(); }
 }).RequireAuthorization("Owner");
 app.MapRazorPages();
-var port = int.TryParse(Environment.GetEnvironmentVariable("HANKAN_PORT"), out var configuredPort) && configuredPort is > 1023 and < 65536
-    ? configuredPort : 5180;
 app.Run($"http://127.0.0.1:{port}");
