@@ -129,6 +129,15 @@ dotnet run --no-build --no-launch-profile --project .\src\HANKAN.Web\HANKAN.Web.
 
 DPAPI 등록 결과는 `access-secrets/pfx-password.dpapi` 또는 `access-secrets/tunnel-token.dpapi`다. 같은 계정에서 재등록하면 복원 확인을 거친 뒤 기존 BLOB을 교체한다. 다른 계정·손상 BLOB은 복원하지 못한다. PFX·비밀번호 BLOB을 교체한 뒤 재시작해야 새 인증서를 사용한다. DPAPI는 디스크 저장 보호이며 실행 계정이나 관리자 진단 권한으로 프로세스 메모리·자식 환경을 읽는 공격까지 막지 않는다.
 
+대화형 콘솔에서는 기존 보안 입력을 사용한다. SSH 비대화형 실행 등 표준 입력이 리디렉션된 경우에는 화면에 입력값을 표시하지 않고 첫 줄만 읽으며 CR/LF 줄 구분자를 제외한다. 앞뒤 공백은 보존하고 빈 고정 터널 토큰은 거부한다. 여러 줄 비밀은 지원하지 않는다. 접근 권한을 제한한 기존 원문 파일이 있다면 아래처럼 별도 PowerShell 프로세스로 전달한다. 원문을 명령 인자에 넣지 않으며 원문 파일의 접근 권한과 보관·삭제는 호출자가 관리한다.
+
+```powershell
+Get-Content -LiteralPath $SecretFile -Raw |
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\set-hankan-access-secret.ps1 -Kind TunnelToken -DataDir $Data
+```
+
+PFX 비밀번호도 같은 방식으로 `-Kind PfxPassword`를 사용한다.
+
 ### 명시 HTTP와 터널 설정 예
 
 시험 HTTP는 HTTPS 설정 대신 다음 파일을 사용하고 재시작한다. 비밀번호 폼이 사라지고 직접 POST도 거부된다.
@@ -148,7 +157,7 @@ Quick 설정에는 루프백 신뢰를 명시하고 토큰을 두지 않는다.
 {"version":1,"mode":"tunnel","trustedProxyIps":["127.0.0.1"]}
 ```
 
-고정 터널은 같은 계정에서 `.\scripts\set-hankan-access-secret.ps1 -Kind TunnelToken -DataDir $Data`를 실행하여 보안 입력으로 등록한다. 아래 hostname은 문서용이며 실제 공개 시험에서는 소유자가 관리하는 origin으로 바꾼다.
+고정 터널은 같은 계정에서 `.\scripts\set-hankan-access-secret.ps1 -Kind TunnelToken -DataDir $Data`의 보안 입력이나 위 표준 입력 파이프로 등록한다. 아래 hostname은 문서용이며 실제 공개 시험에서는 소유자가 관리하는 origin으로 바꾼다.
 
 ```json
 {
