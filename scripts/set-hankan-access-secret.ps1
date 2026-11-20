@@ -9,6 +9,8 @@ Add-Type -AssemblyName System.Security
 $temporary = $null
 $plain = $null
 $restored = $null
+$secure = $null
+$value = $null
 $bstr = [IntPtr]::Zero
 try {
     $DataDir = [IO.Path]::GetFullPath($DataDir)
@@ -39,9 +41,14 @@ try {
         ((Get-Item -LiteralPath $destination -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw 'Linked secret.'
     }
-    $secure = Read-Host -Prompt $Kind -AsSecureString
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-    $value = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    if ([Console]::IsInputRedirected) {
+        # ReadLine removes the CR/LF terminator without echoing the input.
+        $value = [Console]::In.ReadLine()
+    } else {
+        $secure = Read-Host -Prompt $Kind -AsSecureString
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+        $value = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    }
     if ($Kind -eq 'TunnelToken' -and [string]::IsNullOrWhiteSpace($value)) { throw 'Empty token.' }
     $plain = [Text.Encoding]::UTF8.GetBytes($value)
     $value = $null
@@ -70,6 +77,7 @@ try {
     Write-Error '비밀 등록에 실패했습니다. 경로, 연결 폴더, 실행 계정과 권한을 확인하세요.' -ErrorAction Continue
     exit 1
 } finally {
+    $value = $null
     if ($plain) { [Array]::Clear($plain, 0, $plain.Length) }
     if ($restored) { [Array]::Clear($restored, 0, $restored.Length) }
     if ($bstr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
