@@ -171,7 +171,7 @@ Quick 설정에는 루프백 신뢰를 명시하고 토큰을 두지 않는다.
 }
 ```
 
-고정 커넥터는 `cloudflared tunnel run`의 자식 `TUNNEL_TOKEN` 환경만 사용한다. 원문 argv·평문 토큰 파일·사용자/머신 환경으로 우회하지 않는다. 시작 전 설치본 `version`과 `tunnel run --help`에서 환경 전달 지원을 확인하고 지원하지 않으면 local로 남는다. stdout/stderr는 토큰 제거 후 연결 완료·Quick 주소만 허용하여 기록하며 원문 출력·명령 전체·예외 덤프를 남기지 않는다.
+고정 커넥터는 `cloudflared tunnel run --url http://127.0.0.1:<내부 포트>`로 시작하며, 원점에는 앱이 수신하는 `-Port` 값을 사용한다. 토큰은 자식 `TUNNEL_TOKEN` 환경만 사용한다. 원문 argv·평문 토큰 파일·사용자/머신 환경으로 우회하지 않는다. 시작 전 설치본 `version`과 `tunnel run --help`에서 환경 전달 지원을 확인하고 지원하지 않으면 local로 남는다. stdout/stderr는 토큰 제거 후 연결 완료·Quick 주소만 허용하여 기록하며 원문 출력·명령 전체·예외 덤프를 남기지 않는다.
 
 고정 연결 준비는 HTTP/2 등록 신호와 loopback metrics `/ready`로 판정한다. `publicOrigin`은 구성된 접속 주소이며 token의 hostname·원격 ingress·`http://127.0.0.1:<내부 포트>` 연결의 일치를 증명하지 않는다. 고정 모드는 Quick URL을 성공 조건으로 쓰거나 URL 파일에 기록하지 않는다.
 

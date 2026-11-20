@@ -212,7 +212,7 @@ try {
                 $help = [HankanChild]::Probe((New-ChildInfo $CloudflaredPath 'tunnel run --help' $TunnelHome))
                 if ($help -notmatch '\bTUNNEL_TOKEN\b') { throw 'Child token environment is unsupported.' }
                 $token = Read-TunnelToken $status.tokenFile
-                $arguments += ' run'
+                $arguments += " run --url http://127.0.0.1:$Port"
             } elseif ($status.tunnelKind -eq 'quick') {
                 $arguments += " --url http://127.0.0.1:$Port"
             } else { throw 'Invalid tunnel selection.' }
