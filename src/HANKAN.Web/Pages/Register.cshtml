@@ -8,6 +8,12 @@
     <p class="eyebrow">HANKAN / ACCOUNT</p>
     <h1 id="page-title">계정 만들기</h1>
     <p class="lead">가입만으로는 공용 파일에 접근할 수 없으며, 가입 후 권한을 신청할 수 있습니다.</p>
+    @if (!HANKAN.Web.AccessModeRuntime.PasswordsAllowed(HttpContext))
+    {
+        <p class="notice">@HANKAN.Web.AccessModeRuntime.HttpsRequired</p>
+    }
+    else
+    {
     <form method="post" class="setup-form">
         @Html.AntiForgeryToken()
         @if (Model.Error is not null) { <p class="form-error" role="alert">@Model.Error</p> }
@@ -17,5 +23,6 @@
         <input id="password" name="Password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
         <button class="button-primary" type="submit">계정 만들기</button>
     </form>
+    }
     <p class="footnote">이미 계정이 있나요? <a href="/Login">로그인</a></p>
 </section>

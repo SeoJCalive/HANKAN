@@ -1,5 +1,6 @@
 @page
 @model HANKAN.Web.Pages.Admin.ConfigurationModel
+@inject HANKAN.Web.AccessModeRuntime AccessMode
 @{
     ViewData["Title"] = "구성 정보";
     ViewData["Phase"] = "ADMIN / 구성 정보";
@@ -14,6 +15,10 @@
 <section class="status-section" aria-labelledby="status-title">
     <div class="section-heading"><h2 id="status-title">현재 구성</h2></div>
     <dl class="status-list">
+        <div class="status-row"><dt>요청 접속 모드</dt><dd>@AccessMode.Requested.Mode</dd></div>
+        <div class="status-row"><dt>실제 접속 모드</dt><dd>@AccessMode.EffectiveMode</dd></div>
+        <div class="status-row"><dt>현재 접속 origin</dt><dd class="path-value">@(Request.Scheme)://@(Request.Host)</dd></div>
+        <div class="status-row"><dt>모드 적용</dt><dd>@(AccessMode.Failure ?? (AccessMode.RestartRequired ? "재시작 필요" : "시작 시 설정 적용"))</dd></div>
         <div class="status-row"><dt>관리자</dt><dd>@Model.Email</dd></div>
         <div class="status-row"><dt>저장 폴더</dt><dd class="path-value">@Model.Folder</dd></div>
         <div class="status-row"><dt>전체 용량 한도</dt><dd>@await Html.PartialAsync("_ByteSize", (Model.QuotaBytes, "전체 용량 한도"))</dd></div>
@@ -22,4 +27,5 @@
         <div class="status-row"><dt>감사 기록</dt><dd><a href="/Admin/Audit">최근 보호 작업 보기</a></dd></div>
     </dl>
 </section>
+<p class="footnote">접속 모드는 데이터 폴더의 access-mode.json에서 편집하고 앱을 재시작하세요. 이 화면은 읽기 전용입니다.</p>
 <p class="footnote"><a href="/Files">공용 파일</a></p>
