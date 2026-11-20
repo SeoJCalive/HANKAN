@@ -77,3 +77,22 @@ foreach (var page in new[] { "/Login", "/Register", "/Shares" })
     Require(context.Result is null, "HTTPS continues existing validation");
 }
 Console.WriteLine("PASS: peer trust, one-hop header validation, HTTP password rejection, HTTPS continuation");
+foreach (var state in new[] { SetupState.Unconfigured, SetupState.RecoveryRequired })
+{
+    using var mode = new AccessModeRuntime(trustSettings, 55180);
+    mode.Apply(state, directory, webRoot, false);
+    Require(mode.EffectiveMode == "local" && mode.RestartRequired && !mode.Applied, "Bootstrap never opens tunnel");
+}
+using (var mode = new AccessModeRuntime(trustSettings, 55180))
+{
+    mode.Apply(SetupState.Ready, directory, webRoot, false);
+    Require(mode.EffectiveMode == "tunnel" && mode.Applied, "Ready applies requested mode");
+    mode.FallBack("test failure");
+    Require(mode.EffectiveMode == "local" && !mode.Applied && mode.Requested.Mode == "tunnel", "Failure preserves request");
+}
+using (var mode = new AccessModeRuntime(trustSettings, 55180))
+{
+    mode.Apply(SetupState.Ready, directory, webRoot, true);
+    Require(mode.EffectiveMode == "local" && !mode.Applied, "Forced local never opens tunnel");
+}
+Console.WriteLine("PASS: startup setup invariant, mode application, local fallback");
