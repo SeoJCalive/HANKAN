@@ -17,14 +17,19 @@ var runningApp = await BuildApplicationAsync();
 var runningMode = runningApp.Services.GetRequiredService<AccessModeRuntime>();
 try
 {
-    try { await runningApp.StartAsync(); }
+    try
+    {
+        await runningApp.StartAsync();
+        await runningMode.CheckDirectTlsAsync();
+    }
     catch (Exception exception) when (runningMode.EffectiveMode == "direct" &&
-        exception is IOException or InvalidOperationException or System.Net.Sockets.SocketException or CryptographicException)
+        exception is IOException or InvalidOperationException or System.Net.Sockets.SocketException or
+            CryptographicException or System.Security.Authentication.AuthenticationException or OperationCanceledException)
     {
         // Dispose the partially bound server before creating the local-only host.
         try { await runningApp.StopAsync(); }
         finally { await runningApp.DisposeAsync(); }
-        runningMode.FallBack("직접 수신 시작 실패");
+        runningMode.FallBack("직접 수신 또는 TLS 확인 실패");
         runningApp = await BuildApplicationAsync(runningMode);
         await runningApp.StartAsync();
     }
@@ -49,7 +54,7 @@ async Task<WebApplication> BuildApplicationAsync(AccessModeRuntime? previousMode
     else
     {
         try { accessMode = new AccessModeRuntime(AccessModeSettings.Load(dataDirectory, webRoot, port), port); }
-        catch (Exception exception) when (exception is System.Text.Json.JsonException or IOException or
+        catch (Exception exception) when (exception is System.Text.Json.JsonException or InvalidDataException or IOException or
             UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             accessMode = new AccessModeRuntime(AccessModeSettings.Local with { Mode = "invalid" }, port)
